@@ -188,10 +188,7 @@ fn i32_all_valid_lossless() {
     assert_eq!(out, pixels);
 }
 
-/// Lossless f32 image.
-/// The reference encoder uses DeltaDeltaHuffman (lossless float) for f32 with
-/// max_z_error=0.0, which is not yet supported.  Use a small lossy tolerance
-/// instead so the encoder picks tile-based encoding.
+/// Lossless f32 image (DeltaDeltaHuffman path, max_z_error=0.0).
 #[test]
 fn f32_all_valid_lossless() {
     let width = 8usize;
@@ -199,17 +196,35 @@ fn f32_all_valid_lossless() {
     let pixels: Vec<f32> = (0..width * height)
         .map(|i| (i as f32) * 0.5 - 16.0)
         .collect();
-    // max_z_error=0.5 keeps error < 1 ULP for these integer-valued floats and
-    // avoids the DeltaDeltaHuffman path (TryHuffmanFlt requires max_z_error==0).
-    let max_z_error = 0.5f64;
 
-    let blob = ref_encode(&pixels, None, width, height, 1, 1, max_z_error);
+    let blob = ref_encode(&pixels, None, width, height, 1, 1, 0.0);
     let result = lerc::decode(&blob).expect("our decode failed");
 
     let lerc::LercData::F32(out) = result.data else {
         panic!("expected F32, got {:?}", result.info.data_type);
     };
-    assert_approx_eq_f32(&out, &pixels, max_z_error as f32);
+    assert_eq!(out, pixels, "lossless f32 round-trip failed");
+}
+
+/// Lossless f32 with non-trivial values (tests DeltaDeltaHuffman predictor paths).
+#[test]
+fn f32_lossless_varied() {
+    let width = 32usize;
+    let height = 32usize;
+    let pixels: Vec<f32> = (0..width * height)
+        .map(|i| {
+            let x = i as f32;
+            (x * 1.234_567_8).sin() * 100.0 + x * 0.01
+        })
+        .collect();
+
+    let blob = ref_encode(&pixels, None, width, height, 1, 1, 0.0);
+    let result = lerc::decode(&blob).expect("our decode failed");
+
+    let lerc::LercData::F32(out) = result.data else {
+        panic!("expected F32, got {:?}", result.info.data_type);
+    };
+    assert_eq!(out, pixels, "lossless f32 round-trip failed");
 }
 
 /// Lossy f32 image with max_z_error = 0.5.

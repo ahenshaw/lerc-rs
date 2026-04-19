@@ -5,6 +5,7 @@ mod bitmask;
 mod bitstuffer;
 mod huffman;
 mod lerc2;
+mod lossless_float;
 mod rle;
 mod simd;
 

@@ -10,9 +10,9 @@ No external dependencies.
 - All eight pixel types: `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `f32`, `f64`
 - Single-band and multi-band images
 - Validity masks
-- Lossy and lossless (integer) encoding
+- Lossy and lossless encoding (all types, including lossless float via DeltaDeltaHuffman)
 
-**Not supported:** Lerc1 (CntZImage), lossless float (v6 DeltaDeltaHuffman).
+**Not supported:** Lerc1 (CntZImage).
 
 ## Usage
 
@@ -82,6 +82,22 @@ match lerc::decode(&blob) {
     Err(e)                                        => eprintln!("decode error: {e}"),
 }
 ```
+
+## Performance
+
+Benchmarked against the reference C library (`lerc` crate v0.2.1 wrapping Esri's C++ LERC) on an x86-64 Linux host with AVX2, release build (`cargo bench`).
+
+| Fixture | lerc-rs | lerc (C++) | Ratio |
+|---------|--------:|----------:|------:|
+| u8 16×16 (per-call overhead) | 6.2 µs | 2.7 µs | 2.3× |
+| u8 1024×1024 (1 MP) | 5.5 ms | 4.0 ms | 1.4× |
+| i16 1024×1024 (1 MP) | 7.9 ms | 4.2 ms | 1.9× |
+| f32 1024×1024 lossy (1 MP) | 6.5 ms | 3.1 ms | 2.1× |
+| f32 1024×1024 lossless (1 MP) | 17.4 ms | 17.5 ms | 1.0× |
+| f64 1024×1024 lossy (1 MP) | 12.5 ms | 3.7 ms | 3.4× |
+| u8 1024×1024 × 3 bands | 17.4 ms | 11.8 ms | 1.5× |
+
+The f32 lossless path now matches C++ speed. The remaining gaps are in the bitstuffer path (lossy integer/float types) and f64 lossy decode (the C++ reference uses AVX2 SIMD).
 
 ## API
 

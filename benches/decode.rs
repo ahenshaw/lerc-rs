@@ -36,9 +36,15 @@ fn bench_decode(c: &mut Criterion) {
         (0..w_lg * h_lg).map(|i| (i as i32 * 17 - 32768) as i16).collect();
     let blob_i16_lg = make_blob(&pixels_i16_lg, w_lg, h_lg, 1, 0.0);
 
-    // Large f32 (lossy – avoids unsupported DeltaDeltaHuffman path).
+    // Large f32 (lossy).
     let pixels_f32_lg: Vec<f32> = (0..w_lg * h_lg).map(|i| (i as f32) * 0.3).collect();
     let blob_f32_lg = make_blob(&pixels_f32_lg, w_lg, h_lg, 1, 0.5);
+
+    // Large f32 (lossless – DeltaDeltaHuffman path).
+    let pixels_f32_ll: Vec<f32> = (0..w_lg * h_lg)
+        .map(|i| (i as f32 * 1.234_567_8).sin() * 1000.0)
+        .collect();
+    let blob_f32_ll = make_blob(&pixels_f32_ll, w_lg, h_lg, 1, 0.0);
 
     // Large f64 (lossy – tiled path).
     let pixels_f64_lg: Vec<f64> = (0..w_lg * h_lg).map(|i| (i as f64) * 0.3).collect();
@@ -94,6 +100,18 @@ fn bench_decode(c: &mut Criterion) {
     });
     g.bench_function("lerc-ref", |b| {
         b.iter(|| ref_lerc::decode_auto::<f32>(black_box(&blob_f32_lg)).unwrap())
+    });
+    g.finish();
+
+    // -----------------------------------------------------------------
+    // f32 1 MP (lossless)
+    // -----------------------------------------------------------------
+    let mut g = c.benchmark_group("f32_1mp_lossless_1024x1024");
+    g.bench_function("lerc-rs", |b| {
+        b.iter(|| lerc::decode(black_box(&blob_f32_ll)).unwrap())
+    });
+    g.bench_function("lerc-ref", |b| {
+        b.iter(|| ref_lerc::decode_auto::<f32>(black_box(&blob_f32_ll)).unwrap())
     });
     g.finish();
 

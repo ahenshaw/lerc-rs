@@ -20,7 +20,7 @@ cargo fmt          # Format
 - `lerc::decode(blob: &[u8]) -> Result<DecodedData, LercError>` — full decode
 - `lerc::get_lerc_info(blob: &[u8]) -> Result<LercInfo, LercError>` — metadata only, no decode
 
-Lerc1 (CntZImage format) is not supported. Lossless float (v6 DeltaDeltaHuffman) is not supported.
+Lerc1 (CntZImage format) is not supported.
 
 ## Architecture
 
@@ -31,6 +31,7 @@ All decode logic is in `src/lerc2.rs`, which calls into the other modules:
 | `src/lerc2.rs` | Top-level decode: header parsing, checksum, mask, tile/Huffman dispatch, multi-band loop |
 | `src/huffman.rs` | `HuffmanDecoder` — builds a 12-bit LUT + optional binary tree from a ReadCodeTable blob; `decode_one` decodes one symbol |
 | `src/bitstuffer.rs` | `decode()` — BitStuffer2 (v3+ LSB-first and pre-v3 MSB-first bit packing) |
+| `src/lossless_float.rs` | `decode_lossless_f32/f64` — DeltaDeltaHuffman lossless float decoder (v6): byte-plane decompress → inverse predictor → undo float bit transform |
 | `src/bitmask.rs` | `BitMask` — compact bit array matching the C++ layout (bit k at byte k>>3, bit 7-(k&7)) |
 | `src/rle.rs` | `rle_decompress` — signed i16 LE run-length decode for the validity mask |
 | `src/types.rs` | Public types: `DataType`, `LercInfo`, `LercData`, `DecodedData` |

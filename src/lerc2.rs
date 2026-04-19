@@ -7,6 +7,7 @@ use crate::{
     bitstuffer,
     error::LercError,
     huffman::HuffmanDecoder,
+    lossless_float,
     rle,
     types::{DataType, DecodedData, LercData, LercInfo},
 };
@@ -345,6 +346,19 @@ pub(crate) trait LercScalar: Copy + Default + PartialEq + 'static {
             *o = Self::cast_f64((offset + *q as f64 * inv_scale).min(z_max));
         }
     }
+
+    /// Decode a DeltaDeltaHuffman (lossless float) encoded block.
+    /// Only implemented for f32 and f64; all other types return UnsupportedFeature.
+    fn decode_lossless_flt(
+        _src: &[u8],
+        _pos: &mut usize,
+        _data: &mut [Self],
+        _n_cols: usize,
+        _n_rows: usize,
+        _n_depth: usize,
+    ) -> Result<(), LercError> {
+        Err(LercError::UnsupportedFeature("lossless float (DeltaDeltaHuffman)"))
+    }
 }
 
 macro_rules! impl_lerc_scalar_int {
@@ -366,7 +380,7 @@ macro_rules! impl_lerc_scalar_int {
 }
 
 macro_rules! impl_lerc_scalar_flt {
-    ($t:ty, $variant:ident, $dequant:expr) => {
+    ($t:ty, $variant:ident, $dequant:expr, $lossless:expr) => {
         impl LercScalar for $t {
             #[inline] fn cast_f64(v: f64) -> Self { v as $t }
             #[inline] fn to_f64(self) -> f64 { self as f64 }
@@ -383,6 +397,12 @@ macro_rules! impl_lerc_scalar_flt {
             fn dequantize_slice(buf: &[u32], out: &mut [Self], offset: f64, inv_scale: f64, z_max: f64) {
                 $dequant(buf, out, offset, inv_scale, z_max);
             }
+            fn decode_lossless_flt(
+                src: &[u8], pos: &mut usize, data: &mut [Self],
+                n_cols: usize, n_rows: usize, n_depth: usize,
+            ) -> Result<(), LercError> {
+                $lossless(src, pos, data, n_cols, n_rows, n_depth)
+            }
         }
     };
 }
@@ -393,12 +413,10 @@ impl_lerc_scalar_int!(i16, I16);
 impl_lerc_scalar_int!(u16, U16);
 impl_lerc_scalar_int!(i32, I32);
 impl_lerc_scalar_int!(u32, U32);
-impl_lerc_scalar_flt!(f32, F32, crate::simd::dequantize_f32);
-impl_lerc_scalar_flt!(f64, F64, crate::simd::dequantize_f64);
-
-// f64::from_le_bytes needs special handling (different return type).
-// The macro already handles it correctly since `$t::from_le_bytes(arr)` works
-// for all primitive types.
+impl_lerc_scalar_flt!(f32, F32, crate::simd::dequantize_f32,
+    lossless_float::decode_lossless_f32);
+impl_lerc_scalar_flt!(f64, F64, crate::simd::dequantize_f64,
+    lossless_float::decode_lossless_f64);
 
 // ── ReadMask ─────────────────────────────────────────────────────────────────
 
@@ -824,7 +842,7 @@ fn decode_huffman<T: LercScalar>(
                         let k = i * width + j;
                         let m = k * nd + i_depth;
                         if all_valid || mask.is_valid(k) {
-                            let sym = huff.decode_one(src, pos, &mut bit_pos)?;
+                            let sym = if let Some(s) = huff.decode_one_fast(src, pos, &mut bit_pos) { s } else { huff.decode_one(src, pos, &mut bit_pos)? };
                             let delta = T::from_i32_wrapping(sym - offset);
                             // Mirror C++ logic exactly: if left neighbor exists and is
                             // valid, use prevVal; else if above neighbor exists and is
@@ -853,7 +871,7 @@ fn decode_huffman<T: LercScalar>(
                 // Dense sequential writes — iterate directly over output slice
                 // to eliminate per-element index bounds checks.
                 for out in data.iter_mut() {
-                    let sym = huff.decode_one(src, pos, &mut bit_pos)?;
+                    let sym = if let Some(s) = huff.decode_one_fast(src, pos, &mut bit_pos) { s } else { huff.decode_one(src, pos, &mut bit_pos)? };
                     *out = T::from_i32_wrapping(sym - offset);
                 }
             } else {
@@ -863,7 +881,7 @@ fn decode_huffman<T: LercScalar>(
                         let m0 = (k * nd) as usize;
                         if all_valid || mask.is_valid(k) {
                             for d in 0..nd as usize {
-                                let sym = huff.decode_one(src, pos, &mut bit_pos)?;
+                                let sym = if let Some(s) = huff.decode_one_fast(src, pos, &mut bit_pos) { s } else { huff.decode_one(src, pos, &mut bit_pos)? };
                                 data[m0 + d] = T::from_i32_wrapping(sym - offset);
                             }
                         }
@@ -993,9 +1011,17 @@ fn decode_band_impl<T: LercScalar>(
                     }
                 } else {
                     // try_huffman_flt: DeltaDeltaHuffman / lossless float
-                    return Err(LercError::UnsupportedFeature(
-                        "lossless float (DeltaDeltaHuffman)",
-                    ));
+                    if image_encode_mode != ImageEncodeMode::DeltaDeltaHuffman {
+                        return Err(LercError::InvalidBlob);
+                    }
+                    T::decode_lossless_flt(
+                        blob,
+                        &mut pos,
+                        &mut data,
+                        hd.n_cols as usize,
+                        hd.n_rows as usize,
+                        hd.n_depth as usize,
+                    )?;
                 }
                 // noData remapping after Huffman (v6+).
                 if hd.version >= 6 && hd.b_pass_no_data_values && hd.n_depth > 1 {

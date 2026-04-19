@@ -202,6 +202,60 @@ impl HuffmanDecoder {
         })
     }
 
+    /// Fast-path decode for the common case where the symbol is in the 12-bit LUT.
+    ///
+    /// Returns `Some(symbol)` when the LUT contains the code.  Returns `None` for
+    /// long codes (> 12 bits, requiring tree traversal) and for a truncated stream.
+    /// In either `None` case `pos` and `bit_pos` are **not** modified, so the
+    /// caller can safely retry with [`Self::decode_one`].
+    #[inline]
+    pub(crate) fn decode_one_fast(
+        &self,
+        src: &[u8],
+        pos: &mut usize,
+        bit_pos: &mut i32,
+    ) -> Option<i32> {
+        if *pos + 4 > src.len() {
+            return None;
+        }
+        // SAFETY: bounds-checked above; [u8;4] has alignment 1 so read is safe.
+        let temp = unsafe {
+            u32::from_le_bytes(src.as_ptr().add(*pos).cast::<[u8; 4]>().read())
+        };
+
+        let lut_bits = MAX_BITS_LUT as i32;
+        let val_tmp = if 32 - *bit_pos >= lut_bits {
+            ((temp << *bit_pos as u32) >> (32 - lut_bits as u32)) as usize
+        } else {
+            if *pos + 8 > src.len() {
+                return None;
+            }
+            // SAFETY: bounds-checked above.
+            let temp2 = unsafe {
+                u32::from_le_bytes(src.as_ptr().add(*pos + 4).cast::<[u8; 4]>().read())
+            };
+            let hi = (temp << *bit_pos as u32) >> (32 - lut_bits as u32);
+            let lo = temp2 >> (64i32 - lut_bits - *bit_pos) as u32;
+            (hi | lo) as usize
+        };
+
+        // SAFETY: val_tmp is derived from a right-shift that leaves at most
+        // MAX_BITS_LUT (12) bits, so val_tmp < 4096 == self.lut.len().
+        let &(code_len, symbol) = unsafe { self.lut.get_unchecked(val_tmp) };
+
+        if code_len > 0 {
+            *bit_pos += code_len as i32;
+            if *bit_pos >= 32 {
+                *bit_pos -= 32;
+                *pos += 4;
+            }
+            Some(symbol as i32)
+        } else {
+            // Code length > MAX_BITS_LUT; caller must use decode_one for tree walk.
+            None
+        }
+    }
+
     /// Decode one symbol from the MSB-first uint32 bit stream.
     ///
     /// `pos` points to the start of the current uint32; `bit_pos` is the
