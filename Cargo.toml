@@ -1,0 +1,17 @@
+[package]
+name = "lerc-rs"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "lerc"
+
+[dependencies]
+
+[dev-dependencies]
+lerc-ref = { package = "lerc", version = "0.2.1" }
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "decode"
+harness = false
