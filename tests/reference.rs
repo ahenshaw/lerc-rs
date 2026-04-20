@@ -17,8 +17,17 @@ fn ref_encode<T: ref_lerc::LercDataType>(
     max_z_error: f64,
 ) -> Vec<u8> {
     let n_masks = if mask.is_some() { 1 } else { 0 };
-    ref_lerc::encode(data, mask, width, height, depth, n_bands, n_masks, max_z_error)
-        .expect("reference encode failed")
+    ref_lerc::encode(
+        data,
+        mask,
+        width,
+        height,
+        depth,
+        n_bands,
+        n_masks,
+        max_z_error,
+    )
+    .expect("reference encode failed")
 }
 
 /// Assert two float slices agree to within `tol`.
@@ -66,7 +75,9 @@ fn debug_blob_header() {
     println!("full blob ({} bytes):", blob.len());
     for (i, b) in blob.iter().enumerate() {
         print!("[{i:3}]={b:02x}  ");
-        if (i + 1) % 8 == 0 { println!(); }
+        if (i + 1) % 8 == 0 {
+            println!();
+        }
     }
     println!();
 }
@@ -85,7 +96,10 @@ fn u8_all_valid_lossless() {
         panic!("expected U8 data, got {:?}", result.info.data_type);
     };
     assert_eq!(out, pixels);
-    assert!(result.valid_pixels.is_none(), "expected no mask for all-valid");
+    assert!(
+        result.valid_pixels.is_none(),
+        "expected no mask for all-valid"
+    );
 }
 
 /// Lossless u8 image with some invalid pixels (validity mask).
@@ -233,9 +247,7 @@ fn f32_lossy() {
     let width = 16usize;
     let height = 16usize;
     let max_z_error = 0.5f64;
-    let pixels: Vec<f32> = (0..width * height)
-        .map(|i| (i as f32) * 0.3)
-        .collect();
+    let pixels: Vec<f32> = (0..width * height).map(|i| (i as f32) * 0.3).collect();
 
     let blob = ref_encode(&pixels, None, width, height, 1, 1, max_z_error);
     let result = lerc::decode(&blob).expect("our decode failed");
@@ -386,7 +398,8 @@ fn f64_lossless_varied() {
     };
     for (i, (&a, &b)) in out.iter().zip(pixels.iter()).enumerate() {
         assert_eq!(
-            a.to_bits(), b.to_bits(),
+            a.to_bits(),
+            b.to_bits(),
             "bit mismatch at index {i}: {a} vs {b}"
         );
     }
@@ -508,7 +521,8 @@ fn f32_lossy_with_mask() {
             assert!(
                 (out[i] - pixels[i]).abs() <= max_z_error as f32,
                 "value mismatch at valid pixel {i}: {} vs {}",
-                out[i], pixels[i]
+                out[i],
+                pixels[i]
             );
         }
     }
@@ -546,8 +560,7 @@ fn multiband_with_mask() {
     let height = 8usize;
     let n_bands = 2usize;
     let n = width * height;
-    let pixels: Vec<u8> =
-        (0..n * n_bands).map(|i| (i * 13 % 256) as u8).collect();
+    let pixels: Vec<u8> = (0..n * n_bands).map(|i| (i * 13 % 256) as u8).collect();
     let mask: Vec<u8> = (0..n).map(|i| if i % 3 == 0 { 0 } else { 1 }).collect();
 
     let blob = ref_encode(&pixels, Some(&mask), width, height, 1, n_bands, 0.0);
@@ -678,7 +691,7 @@ fn get_lerc_info_float_metadata() {
     let max_z_error = 0.25f64;
     let pixels: Vec<f32> = (0..width * height).map(|i| i as f32 * 1.5).collect();
     let expected_min = *pixels.first().unwrap() as f64; // 0.0
-    let expected_max = *pixels.last().unwrap() as f64;  // 94.5
+    let expected_max = *pixels.last().unwrap() as f64; // 94.5
 
     let blob = ref_encode(&pixels, None, width, height, 1, 1, max_z_error);
     let info = lerc::get_lerc_info(&blob).expect("get_lerc_info failed");
@@ -687,19 +700,32 @@ fn get_lerc_info_float_metadata() {
     // z_min / z_max bracket the input range within the allowed error.
     assert!(
         info.z_min <= expected_min + max_z_error + 1e-9,
-        "z_min {} too large (expected ≤ {})", info.z_min, expected_min + max_z_error
+        "z_min {} too large (expected ≤ {})",
+        info.z_min,
+        expected_min + max_z_error
     );
     assert!(
         info.z_max >= expected_max - max_z_error - 1e-9,
-        "z_max {} too small (expected ≥ {})", info.z_max, expected_max - max_z_error
+        "z_max {} too small (expected ≥ {})",
+        info.z_max,
+        expected_max - max_z_error
     );
     assert!(
         info.max_z_error <= max_z_error + 1e-9,
-        "max_z_error {} > {}", info.max_z_error, max_z_error
+        "max_z_error {} > {}",
+        info.max_z_error,
+        max_z_error
     );
-    assert!(info.version >= 1, "expected LERC2 version ≥ 1, got {}", info.version);
+    assert!(
+        info.version >= 1,
+        "expected LERC2 version ≥ 1, got {}",
+        info.version
+    );
     assert_eq!(
-        info.blob_size as usize, blob.len(),
-        "blob_size mismatch: {} vs actual {}", info.blob_size, blob.len()
+        info.blob_size as usize,
+        blob.len(),
+        "blob_size mismatch: {} vs actual {}",
+        info.blob_size,
+        blob.len()
     );
 }

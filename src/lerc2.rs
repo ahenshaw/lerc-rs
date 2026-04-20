@@ -7,8 +7,7 @@ use crate::{
     bitstuffer,
     error::LercError,
     huffman::HuffmanDecoder,
-    lossless_float,
-    rle,
+    lossless_float, rle,
     types::{DataType, DecodedData, LercData, LercInfo},
 };
 
@@ -49,12 +48,6 @@ impl HeaderInfo {
         self.version >= 6
             && matches!(self.dt, DataType::F32 | DataType::F64)
             && self.max_z_error == 0.0
-    }
-}
-
-impl Default for DataType {
-    fn default() -> Self {
-        DataType::U8
     }
 }
 
@@ -122,7 +115,7 @@ fn read_header(src: &[u8], pos: &mut usize) -> Result<HeaderInfo, LercError> {
     *pos = KEY_LEN;
 
     let version = read_i32(src, pos)?;
-    if version < 1 || version > 6 {
+    if !(1..=6).contains(&version) {
         return Err(LercError::UnsupportedVersion(version));
     }
 
@@ -269,11 +262,7 @@ fn get_data_type_used(dt: DataType, tc: i32) -> Option<DataType> {
 
 // ── ReadVariableDataType ─────────────────────────────────────────────────────
 
-fn read_variable_data_type(
-    src: &[u8],
-    pos: &mut usize,
-    dt: DataType,
-) -> Result<f64, LercError> {
+fn read_variable_data_type(src: &[u8], pos: &mut usize, dt: DataType) -> Result<f64, LercError> {
     Ok(match dt {
         DataType::I8 => {
             let v = src.get(*pos).copied().ok_or(LercError::TruncatedBlob)? as i8;
@@ -357,24 +346,40 @@ pub(crate) trait LercScalar: Copy + Default + PartialEq + 'static {
         _n_rows: usize,
         _n_depth: usize,
     ) -> Result<(), LercError> {
-        Err(LercError::UnsupportedFeature("lossless float (DeltaDeltaHuffman)"))
+        Err(LercError::UnsupportedFeature(
+            "lossless float (DeltaDeltaHuffman)",
+        ))
     }
 }
 
 macro_rules! impl_lerc_scalar_int {
     ($t:ty, $variant:ident) => {
         impl LercScalar for $t {
-            #[inline] fn cast_f64(v: f64) -> Self { v as $t }
-            #[inline] fn to_f64(self) -> f64 { self as f64 }
+            #[inline]
+            fn cast_f64(v: f64) -> Self {
+                v as $t
+            }
+            #[inline]
+            fn to_f64(self) -> f64 {
+                self as f64
+            }
             fn read_le(src: &[u8], pos: &mut usize) -> Result<Self, LercError> {
                 const SZ: usize = core::mem::size_of::<$t>();
-                if *pos + SZ > src.len() { return Err(LercError::TruncatedBlob); }
+                if *pos + SZ > src.len() {
+                    return Err(LercError::TruncatedBlob);
+                }
                 let arr: [u8; SZ] = src[*pos..*pos + SZ].try_into().unwrap();
                 *pos += SZ;
                 Ok(<$t>::from_le_bytes(arr))
             }
-            #[inline] fn wrapping_add(self, other: Self) -> Self { self.wrapping_add(other) }
-            #[inline] fn from_i32_wrapping(v: i32) -> Self { v as $t }
+            #[inline]
+            fn wrapping_add(self, other: Self) -> Self {
+                self.wrapping_add(other)
+            }
+            #[inline]
+            fn from_i32_wrapping(v: i32) -> Self {
+                v as $t
+            }
         }
     };
 }
@@ -382,24 +387,48 @@ macro_rules! impl_lerc_scalar_int {
 macro_rules! impl_lerc_scalar_flt {
     ($t:ty, $variant:ident, $dequant:expr, $lossless:expr) => {
         impl LercScalar for $t {
-            #[inline] fn cast_f64(v: f64) -> Self { v as $t }
-            #[inline] fn to_f64(self) -> f64 { self as f64 }
+            #[inline]
+            fn cast_f64(v: f64) -> Self {
+                v as $t
+            }
+            #[inline]
+            fn to_f64(self) -> f64 {
+                self as f64
+            }
             fn read_le(src: &[u8], pos: &mut usize) -> Result<Self, LercError> {
                 const SZ: usize = core::mem::size_of::<$t>();
-                if *pos + SZ > src.len() { return Err(LercError::TruncatedBlob); }
+                if *pos + SZ > src.len() {
+                    return Err(LercError::TruncatedBlob);
+                }
                 let arr: [u8; SZ] = src[*pos..*pos + SZ].try_into().unwrap();
                 *pos += SZ;
                 Ok(<$t>::from_le_bytes(arr))
             }
-            #[inline] fn wrapping_add(self, other: Self) -> Self { self + other }
-            #[inline] fn from_i32_wrapping(v: i32) -> Self { v as $t }
             #[inline]
-            fn dequantize_slice(buf: &[u32], out: &mut [Self], offset: f64, inv_scale: f64, z_max: f64) {
+            fn wrapping_add(self, other: Self) -> Self {
+                self + other
+            }
+            #[inline]
+            fn from_i32_wrapping(v: i32) -> Self {
+                v as $t
+            }
+            #[inline]
+            fn dequantize_slice(
+                buf: &[u32],
+                out: &mut [Self],
+                offset: f64,
+                inv_scale: f64,
+                z_max: f64,
+            ) {
                 $dequant(buf, out, offset, inv_scale, z_max);
             }
             fn decode_lossless_flt(
-                src: &[u8], pos: &mut usize, data: &mut [Self],
-                n_cols: usize, n_rows: usize, n_depth: usize,
+                src: &[u8],
+                pos: &mut usize,
+                data: &mut [Self],
+                n_cols: usize,
+                n_rows: usize,
+                n_depth: usize,
             ) -> Result<(), LercError> {
                 $lossless(src, pos, data, n_cols, n_rows, n_depth)
             }
@@ -407,16 +436,24 @@ macro_rules! impl_lerc_scalar_flt {
     };
 }
 
-impl_lerc_scalar_int!(i8,  I8);
-impl_lerc_scalar_int!(u8,  U8);
+impl_lerc_scalar_int!(i8, I8);
+impl_lerc_scalar_int!(u8, U8);
 impl_lerc_scalar_int!(i16, I16);
 impl_lerc_scalar_int!(u16, U16);
 impl_lerc_scalar_int!(i32, I32);
 impl_lerc_scalar_int!(u32, U32);
-impl_lerc_scalar_flt!(f32, F32, crate::simd::dequantize_f32,
-    lossless_float::decode_lossless_f32);
-impl_lerc_scalar_flt!(f64, F64, crate::simd::dequantize_f64,
-    lossless_float::decode_lossless_f64);
+impl_lerc_scalar_flt!(
+    f32,
+    F32,
+    crate::simd::dequantize_f32,
+    lossless_float::decode_lossless_f32
+);
+impl_lerc_scalar_flt!(
+    f64,
+    F64,
+    crate::simd::dequantize_f64,
+    lossless_float::decode_lossless_f64
+);
 
 // ── ReadMask ─────────────────────────────────────────────────────────────────
 
@@ -635,15 +672,11 @@ fn read_tile<T: LercScalar>(
             } else {
                 hd.dt
             };
-            let dt_used =
-                get_data_type_used(eff_dt, bits67).ok_or(LercError::InvalidBlob)?;
+            let dt_used = get_data_type_used(eff_dt, bits67).ok_or(LercError::InvalidBlob)?;
 
             let offset = read_variable_data_type(src, pos, dt_used)?;
 
-            let z_max = if hd.version >= 4
-                && n_depth > 1
-                && (i_depth as usize) < z_max_vec.len()
-            {
+            let z_max = if hd.version >= 4 && n_depth > 1 && (i_depth as usize) < z_max_vec.len() {
                 z_max_vec[i_depth as usize]
             } else {
                 hd.z_max
@@ -766,12 +799,19 @@ fn read_tiles<T: LercScalar>(
 
     for i_tile in 0..n_tiles_vert {
         let i0 = i_tile * mb;
-        let tile_h = if i_tile == n_tiles_vert - 1 { hd.n_rows - i0 } else { mb };
+        let tile_h = if i_tile == n_tiles_vert - 1 {
+            hd.n_rows - i0
+        } else {
+            mb
+        };
 
         for j_tile in 0..n_tiles_hori {
             let j0 = j_tile * mb;
-            let tile_w =
-                if j_tile == n_tiles_hori - 1 { hd.n_cols - j0 } else { mb };
+            let tile_w = if j_tile == n_tiles_hori - 1 {
+                hd.n_cols - j0
+            } else {
+                mb
+            };
 
             for i_depth in 0..hd.n_depth {
                 read_tile(
@@ -849,21 +889,23 @@ fn decode_huffman<T: LercScalar>(
                         let k = i * width + j;
                         let m = k * nd + i_depth;
                         if all_valid || mask.is_valid(k) {
-                            let sym = if let Some(s) = huff.decode_one_fast(src, pos, &mut bit_pos) { s } else { huff.decode_one(src, pos, &mut bit_pos)? };
+                            let sym = if let Some(s) = huff.decode_one_fast(src, pos, &mut bit_pos)
+                            {
+                                s
+                            } else {
+                                huff.decode_one(src, pos, &mut bit_pos)?
+                            };
                             let delta = T::from_i32_wrapping(sym - offset);
                             // Mirror C++ logic exactly: if left neighbor exists and is
                             // valid, use prevVal; else if above neighbor exists and is
                             // valid, use that; else use prevVal.
-                            let prev_nbr =
-                                if j > 0 && (all_valid || mask.is_valid(k - 1)) {
-                                    prev_val
-                                } else if i > 0
-                                    && (all_valid || mask.is_valid(k - width))
-                                {
-                                    data[(m - width * nd) as usize]
-                                } else {
-                                    prev_val
-                                };
+                            let prev_nbr = if j > 0 && (all_valid || mask.is_valid(k - 1)) {
+                                prev_val
+                            } else if i > 0 && (all_valid || mask.is_valid(k - width)) {
+                                data[(m - width * nd) as usize]
+                            } else {
+                                prev_val
+                            };
                             let v = delta.wrapping_add(prev_nbr);
                             data[m as usize] = v;
                             prev_val = v;
@@ -878,7 +920,11 @@ fn decode_huffman<T: LercScalar>(
                 // Dense sequential writes — iterate directly over output slice
                 // to eliminate per-element index bounds checks.
                 for out in data.iter_mut() {
-                    let sym = if let Some(s) = huff.decode_one_fast(src, pos, &mut bit_pos) { s } else { huff.decode_one(src, pos, &mut bit_pos)? };
+                    let sym = if let Some(s) = huff.decode_one_fast(src, pos, &mut bit_pos) {
+                        s
+                    } else {
+                        huff.decode_one(src, pos, &mut bit_pos)?
+                    };
                     *out = T::from_i32_wrapping(sym - offset);
                 }
             } else {
@@ -888,7 +934,12 @@ fn decode_huffman<T: LercScalar>(
                         let m0 = (k * nd) as usize;
                         if all_valid || mask.is_valid(k) {
                             for d in 0..nd as usize {
-                                let sym = if let Some(s) = huff.decode_one_fast(src, pos, &mut bit_pos) { s } else { huff.decode_one(src, pos, &mut bit_pos)? };
+                                let sym =
+                                    if let Some(s) = huff.decode_one_fast(src, pos, &mut bit_pos) {
+                                        s
+                                    } else {
+                                        huff.decode_one(src, pos, &mut bit_pos)?
+                                    };
                                 data[m0 + d] = T::from_i32_wrapping(sym - offset);
                             }
                         }
@@ -941,7 +992,14 @@ fn decode_band_impl<T: LercScalar>(
     // Read bit-mask.  For multiband blobs with n_masks=1, subsequent bands store
     // num_bytes_mask=0 to signal "same mask as previous band"; prev_mask carries
     // that mask forward.
-    let mask = read_mask(blob, &mut pos, hd.n_rows, hd.n_cols, hd.num_valid_pixel, prev_mask)?;
+    let mask = read_mask(
+        blob,
+        &mut pos,
+        hd.n_rows,
+        hd.n_cols,
+        hd.num_valid_pixel,
+        prev_mask,
+    )?;
 
     // Allocate pixel buffer (zero-initialized).
     let n_total = hd.n_rows as usize * hd.n_cols as usize * hd.n_depth as usize;
@@ -954,7 +1012,15 @@ fn decode_band_impl<T: LercScalar>(
 
     // Constant image.
     if hd.z_min == hd.z_max {
-        fill_const_image(&mut data, &mask, hd.n_rows, hd.n_cols, hd.n_depth, hd.z_min, &[]);
+        fill_const_image(
+            &mut data,
+            &mask,
+            hd.n_rows,
+            hd.n_cols,
+            hd.n_depth,
+            hd.z_min,
+            &[],
+        );
         return Ok((data, mask, hd));
     }
 
@@ -966,17 +1032,9 @@ fn decode_band_impl<T: LercScalar>(
     };
 
     // If all per-depth mins == maxs, fill constant.
-    if !z_min_vec.is_empty()
-        && z_min_vec.iter().zip(z_max_vec.iter()).all(|(a, b)| a == b)
-    {
+    if !z_min_vec.is_empty() && z_min_vec.iter().zip(z_max_vec.iter()).all(|(a, b)| a == b) {
         fill_const_image(
-            &mut data,
-            &mask,
-            hd.n_rows,
-            hd.n_cols,
-            hd.n_depth,
-            hd.z_min,
-            &z_min_vec,
+            &mut data, &mask, hd.n_rows, hd.n_cols, hd.n_depth, hd.z_min, &z_min_vec,
         );
         return Ok((data, mask, hd));
     }
@@ -988,10 +1046,7 @@ fn decode_band_impl<T: LercScalar>(
         // Check for Huffman encoding.
         if hd.try_huffman_int() || hd.try_huffman_flt() {
             let flag = read_u8(blob, &mut pos)?;
-            if flag > 3
-                || (flag > 2 && hd.version < 6)
-                || (flag > 1 && hd.version < 4)
-            {
+            if flag > 3 || (flag > 2 && hd.version < 6) || (flag > 1 && hd.version < 4) {
                 return Err(LercError::InvalidBlob);
             }
             let image_encode_mode = match flag {
@@ -1005,17 +1060,9 @@ fn decode_band_impl<T: LercScalar>(
             if image_encode_mode != ImageEncodeMode::Tiling {
                 if hd.try_huffman_int() {
                     if image_encode_mode == ImageEncodeMode::DeltaHuffman
-                        || (hd.version >= 4
-                            && image_encode_mode == ImageEncodeMode::Huffman)
+                        || (hd.version >= 4 && image_encode_mode == ImageEncodeMode::Huffman)
                     {
-                        decode_huffman(
-                            blob,
-                            &mut pos,
-                            &mut data,
-                            &hd,
-                            &mask,
-                            image_encode_mode,
-                        )?;
+                        decode_huffman(blob, &mut pos, &mut data, &hd, &mask, image_encode_mode)?;
                     } else {
                         return Err(LercError::InvalidBlob);
                     }
@@ -1082,8 +1129,8 @@ fn dispatch_read_min_max(
 ) -> Result<(Vec<f64>, Vec<f64>), LercError> {
     let nd = hd.n_depth as usize;
     match hd.dt {
-        DataType::I8  => read_min_max_ranges::<i8>(blob, pos, nd),
-        DataType::U8  => read_min_max_ranges::<u8>(blob, pos, nd),
+        DataType::I8 => read_min_max_ranges::<i8>(blob, pos, nd),
+        DataType::U8 => read_min_max_ranges::<u8>(blob, pos, nd),
         DataType::I16 => read_min_max_ranges::<i16>(blob, pos, nd),
         DataType::U16 => read_min_max_ranges::<u16>(blob, pos, nd),
         DataType::I32 => read_min_max_ranges::<i32>(blob, pos, nd),
@@ -1173,7 +1220,11 @@ pub fn get_lerc_info(src: &[u8]) -> Result<LercInfo, LercError> {
         return Err(LercError::InvalidBlob);
     }
 
-    let mut n_masks: i32 = if has_mask || first_hd.num_valid_pixel == 0 { 1 } else { 0 };
+    let mut n_masks: i32 = if has_mask || first_hd.num_valid_pixel == 0 {
+        1
+    } else {
+        0
+    };
     let mut n_uses_no_data: i32 = if first_hd.b_pass_no_data_values { 1 } else { 0 };
 
     let mut total_blob_size = first_hd.blob_size as i64;
@@ -1272,7 +1323,7 @@ pub fn decode(src: &[u8]) -> Result<DecodedData, LercError> {
     let mut any_no_data = false;
     let mut prev_mask: Option<BitMask> = None;
 
-    for _ib in 0..n_bands {
+    for item in no_data_values.iter_mut().take(n_bands) {
         let (band, mask, hd) =
             decode_band_dispatch(src, blob_offset, info.data_type, prev_mask.as_ref())?;
         blob_offset += hd.blob_size as usize;
@@ -1280,7 +1331,7 @@ pub fn decode(src: &[u8]) -> Result<DecodedData, LercError> {
         band_masks.push(mask_to_bytes(&mask));
 
         if hd.b_pass_no_data_values {
-            no_data_values[_ib] = hd.no_data_val_orig;
+            *item = hd.no_data_val_orig;
             any_no_data = true;
         }
 
@@ -1292,9 +1343,7 @@ pub fn decode(src: &[u8]) -> Result<DecodedData, LercError> {
     let data = merge_band_data(band_data, n_bands, n_elem)?;
 
     // Determine valid_pixels.
-    let all_valid = band_masks
-        .iter()
-        .all(|m| m.iter().all(|&b| b == 1));
+    let all_valid = band_masks.iter().all(|m| m.iter().all(|&b| b == 1));
 
     let valid_pixels = if all_valid {
         None
@@ -1349,8 +1398,8 @@ fn merge_band_data(
     }
 
     let data = match &bands[0] {
-        BandResult::I8(_)  => merge!(I8,  i8),
-        BandResult::U8(_)  => merge!(U8,  u8),
+        BandResult::I8(_) => merge!(I8, i8),
+        BandResult::U8(_) => merge!(U8, u8),
         BandResult::I16(_) => merge!(I16, i16),
         BandResult::U16(_) => merge!(U16, u16),
         BandResult::I32(_) => merge!(I32, i32),

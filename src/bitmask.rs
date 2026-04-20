@@ -13,7 +13,7 @@ impl BitMask {
             return None;
         }
         let n_pixels = width as usize * height as usize;
-        let size = (n_pixels + 7) / 8;
+        let size = n_pixels.div_ceil(8);
         Some(Self {
             data: vec![0u8; size],
             width,
@@ -26,7 +26,7 @@ impl BitMask {
     }
 
     pub fn size(&self) -> usize {
-        (self.width as usize * self.height as usize + 7) / 8
+        (self.width as usize * self.height as usize).div_ceil(8)
     }
 
     pub fn n_pixels(&self) -> usize {

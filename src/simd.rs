@@ -10,9 +10,9 @@
 ///
 /// Runtime feature detection is used so the binary runs correctly on CPUs
 /// that don't support AVX2.
-
+//
 // ── f32 ───────────────────────────────────────────────────────────────────────
-
+//
 /// Dequantize `buf` into f32 pixels.
 /// Parameters are `f64` to match the `LercScalar::dequantize_slice` signature;
 /// they are narrowed to f32 before entering the hot loop.

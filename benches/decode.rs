@@ -32,8 +32,9 @@ fn bench_decode(c: &mut Criterion) {
     let blob_u8_lg = make_blob(&pixels_u8_lg, w_lg, h_lg, 1, 0.0);
 
     // Large i16.
-    let pixels_i16_lg: Vec<i16> =
-        (0..w_lg * h_lg).map(|i| (i as i32 * 17 - 32768) as i16).collect();
+    let pixels_i16_lg: Vec<i16> = (0..w_lg * h_lg)
+        .map(|i| (i as i32 * 17 - 32768) as i16)
+        .collect();
     let blob_i16_lg = make_blob(&pixels_i16_lg, w_lg, h_lg, 1, 0.0);
 
     // Large f32 (lossy).
@@ -51,8 +52,7 @@ fn bench_decode(c: &mut Criterion) {
     let blob_f64_lg = make_blob(&pixels_f64_lg, w_lg, h_lg, 1, 0.5);
 
     // 3-band u8 (1 MP × 3 bands).
-    let pixels_u8_3band: Vec<u8> =
-        (0..w_lg * h_lg * 3).map(|i| (i * 11 % 256) as u8).collect();
+    let pixels_u8_3band: Vec<u8> = (0..w_lg * h_lg * 3).map(|i| (i * 11 % 256) as u8).collect();
     let blob_u8_3band = make_blob(&pixels_u8_3band, w_lg, h_lg, 3, 0.0);
 
     // -----------------------------------------------------------------

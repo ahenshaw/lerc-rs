@@ -1,8 +1,9 @@
 /// Data types supported by LERC, matching the C++ enum order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[repr(i32)]
 pub enum DataType {
     I8 = 0,
+    #[default]
     U8 = 1,
     I16 = 2,
     U16 = 3,

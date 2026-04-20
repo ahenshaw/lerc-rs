@@ -27,28 +27,20 @@ pub(crate) struct HuffmanDecoder {
 
 impl HuffmanDecoder {
     /// Parse a Huffman code table from the blob at `*pos` and build the decoder.
-    pub fn from_blob(
-        src: &[u8],
-        pos: &mut usize,
-        lerc2_version: i32,
-    ) -> Result<Self, LercError> {
+    pub fn from_blob(src: &[u8], pos: &mut usize, lerc2_version: i32) -> Result<Self, LercError> {
         if *pos + 16 > src.len() {
             return Err(LercError::TruncatedBlob);
         }
-        let huffman_version =
-            i32::from_le_bytes(src[*pos..*pos + 4].try_into().unwrap());
+        let huffman_version = i32::from_le_bytes(src[*pos..*pos + 4].try_into().unwrap());
         *pos += 4;
-        let table_size =
-            i32::from_le_bytes(src[*pos..*pos + 4].try_into().unwrap()) as usize;
+        let table_size = i32::from_le_bytes(src[*pos..*pos + 4].try_into().unwrap()) as usize;
         *pos += 4;
         let i0 = i32::from_le_bytes(src[*pos..*pos + 4].try_into().unwrap());
         *pos += 4;
         let i1 = i32::from_le_bytes(src[*pos..*pos + 4].try_into().unwrap());
         *pos += 4;
 
-        if huffman_version < 2 || i0 >= i1 || i0 < 0 || table_size == 0
-            || table_size > (1 << 15)
-        {
+        if huffman_version < 2 || i0 >= i1 || i0 < 0 || table_size == 0 || table_size > (1 << 15) {
             return Err(LercError::InvalidBlob);
         }
 
@@ -83,8 +75,7 @@ impl HuffmanDecoder {
                 if *pos + 4 > src.len() {
                     return Err(LercError::TruncatedBlob);
                 }
-                let temp =
-                    u32::from_le_bytes(src[*pos..*pos + 4].try_into().unwrap());
+                let temp = u32::from_le_bytes(src[*pos..*pos + 4].try_into().unwrap());
                 let code = (temp << bit_pos as u32) >> (32 - len as u32);
 
                 if 32 - bit_pos >= len {
@@ -99,8 +90,7 @@ impl HuffmanDecoder {
                     if *pos + 4 > src.len() {
                         return Err(LercError::TruncatedBlob);
                     }
-                    let temp2 =
-                        u32::from_le_bytes(src[*pos..*pos + 4].try_into().unwrap());
+                    let temp2 = u32::from_le_bytes(src[*pos..*pos + 4].try_into().unwrap());
                     code_table[k].1 = code | (temp2 >> (32 - bit_pos as u32));
                     continue;
                 }
@@ -155,9 +145,7 @@ impl HuffmanDecoder {
 
         if need_tree {
             // Allocate root (index 0).
-            tree.push(TreeNode {
-                child: [-1, -1],
-            });
+            tree.push(TreeNode { child: [-1, -1] });
 
             for i in i0..i1 {
                 let k = wrap_idx(i, table_size);
@@ -181,9 +169,7 @@ impl HuffmanDecoder {
                     if child < 0 {
                         // Create new internal node.
                         let new_idx = tree.len() as i32;
-                        tree.push(TreeNode {
-                            child: [-1, -1],
-                        });
+                        tree.push(TreeNode { child: [-1, -1] });
                         tree[node_idx].child[bit] = new_idx;
                         node_idx = new_idx as usize;
                     } else {
@@ -219,9 +205,7 @@ impl HuffmanDecoder {
             return None;
         }
         // SAFETY: bounds-checked above; [u8;4] has alignment 1 so read is safe.
-        let temp = unsafe {
-            u32::from_le_bytes(src.as_ptr().add(*pos).cast::<[u8; 4]>().read())
-        };
+        let temp = unsafe { u32::from_le_bytes(src.as_ptr().add(*pos).cast::<[u8; 4]>().read()) };
 
         let lut_bits = MAX_BITS_LUT as i32;
         let val_tmp = if 32 - *bit_pos >= lut_bits {
@@ -231,9 +215,8 @@ impl HuffmanDecoder {
                 return None;
             }
             // SAFETY: bounds-checked above.
-            let temp2 = unsafe {
-                u32::from_le_bytes(src.as_ptr().add(*pos + 4).cast::<[u8; 4]>().read())
-            };
+            let temp2 =
+                unsafe { u32::from_le_bytes(src.as_ptr().add(*pos + 4).cast::<[u8; 4]>().read()) };
             let hi = (temp << *bit_pos as u32) >> (32 - lut_bits as u32);
             let lo = temp2 >> (64i32 - lut_bits - *bit_pos) as u32;
             (hi | lo) as usize
@@ -279,8 +262,7 @@ impl HuffmanDecoder {
             if *pos + 8 > src.len() {
                 return Err(LercError::TruncatedBlob);
             }
-            let temp2 =
-                u32::from_le_bytes(src[*pos + 4..*pos + 8].try_into().unwrap());
+            let temp2 = u32::from_le_bytes(src[*pos + 4..*pos + 8].try_into().unwrap());
             let hi = (temp << *bit_pos as u32) >> (32 - lut_bits as u32);
             let lo = temp2 >> (64i32 - lut_bits - *bit_pos) as u32;
             hi | lo

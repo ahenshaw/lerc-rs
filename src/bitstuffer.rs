@@ -39,7 +39,7 @@ fn bit_unstuff_v3(
     out: &mut Vec<u32>,
 ) -> bool {
     let total_bits = num_elem as u64 * num_bits as u64;
-    let num_uints = ((total_bits + 31) / 32) as usize;
+    let num_uints = (total_bits.div_ceil(32)) as usize;
     let num_bytes = num_uints * 4;
     let ntbnn = num_tail_bytes_not_needed(num_elem, num_bits);
     let num_bytes_used = num_bytes.saturating_sub(ntbnn);
@@ -60,7 +60,11 @@ fn bit_unstuff_v3(
     });
 
     // Extract num_bits-wide values using a u64 accumulator.
-    let mask: u32 = if num_bits < 32 { (1u32 << num_bits) - 1 } else { u32::MAX };
+    let mask: u32 = if num_bits < 32 {
+        (1u32 << num_bits) - 1
+    } else {
+        u32::MAX
+    };
 
     out.clear();
     out.reserve(num_elem);
@@ -70,7 +74,9 @@ fn bit_unstuff_v3(
 
     for _ in 0..num_elem {
         if bits_in_acc < num_bits as u32 {
-            let Some(w) = words.next() else { return false; };
+            let Some(w) = words.next() else {
+                return false;
+            };
             acc |= (w as u64) << bits_in_acc;
             bits_in_acc += 32;
         }
@@ -91,9 +97,9 @@ fn bit_unstuff_pre_v3(
     out: &mut Vec<u32>,
 ) -> bool {
     let total_bits = num_elem as u64 * num_bits as u64;
-    let num_uints = ((total_bits + 31) / 32) as usize;
+    let num_uints = (total_bits.div_ceil(32)) as usize;
     let ntbnn = num_tail_bytes_not_needed(num_elem, num_bits);
-    let n_bytes_to_copy = (num_elem * num_bits + 7) / 8;
+    let n_bytes_to_copy = (num_elem * num_bits).div_ceil(8);
 
     if *pos + n_bytes_to_copy > src.len() {
         return false;
@@ -169,8 +175,7 @@ pub(crate) fn decode(
     let do_lut = (hdr & (1 << 5)) != 0;
     let num_bits = (hdr & 31) as usize;
 
-    let num_elements =
-        decode_uint(src, pos, nb).ok_or(LercError::TruncatedBlob)? as usize;
+    let num_elements = decode_uint(src, pos, nb).ok_or(LercError::TruncatedBlob)? as usize;
     if num_elements > max_count {
         return Err(LercError::DecodeFailed);
     }

@@ -204,8 +204,7 @@ fn decode_byte_plane_into(
             out.reserve(expected_size);
             let mut bit_pos = 0i32;
             for _ in 0..expected_size {
-                let sym = if let Some(s) =
-                    huff.decode_one_fast(compressed, &mut pos, &mut bit_pos)
+                let sym = if let Some(s) = huff.decode_one_fast(compressed, &mut pos, &mut bit_pos)
                 {
                     s
                 } else {
@@ -221,8 +220,7 @@ fn decode_byte_plane_into(
                 return Err(LercError::TruncatedBlob);
             }
             let value = compressed[1];
-            let count =
-                u32::from_le_bytes(compressed[2..6].try_into().unwrap()) as usize;
+            let count = u32::from_le_bytes(compressed[2..6].try_into().unwrap()) as usize;
             if count != expected_size {
                 return Err(LercError::InvalidBlob);
             }
@@ -288,8 +286,7 @@ pub(crate) fn decode_lossless_f32(
         *pos += 1;
         let best_level = src[*pos] as usize;
         *pos += 1;
-        let compressed_size =
-            u32::from_le_bytes(src[*pos..*pos + 4].try_into().unwrap()) as usize;
+        let compressed_size = u32::from_le_bytes(src[*pos..*pos + 4].try_into().unwrap()) as usize;
         *pos += 4;
 
         if byte_index >= 4 {
@@ -369,8 +366,7 @@ pub(crate) fn decode_lossless_f64(
         *pos += 1;
         let best_level = src[*pos] as usize;
         *pos += 1;
-        let compressed_size =
-            u32::from_le_bytes(src[*pos..*pos + 4].try_into().unwrap()) as usize;
+        let compressed_size = u32::from_le_bytes(src[*pos..*pos + 4].try_into().unwrap()) as usize;
         *pos += 4;
 
         if byte_index >= 8 {
