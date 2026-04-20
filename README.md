@@ -7,12 +7,11 @@ No external dependencies.
 ## Supported formats
 
 - LERC2 versions 1–6
-- All eight pixel types: `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `f32`, `f64`
+- LERC1 (CntZImage) — decoded as `f32`
+- All eight pixel types for LERC2: `i8`, `u8`, `i16`, `u16`, `i32`, `u32`, `f32`, `f64`
 - Single-band and multi-band images
 - Validity masks
 - Lossy and lossless encoding (all types, including lossless float via DeltaDeltaHuffman)
-
-**Not supported:** Lerc1 (CntZImage).
 
 ## Usage
 
@@ -93,7 +92,7 @@ LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --test reference
 
 The `LIBCLANG_PATH` env var is required because the reference crate uses bindgen.
 
-Coverage includes all eight pixel types (including lossy and lossless variants), validity masks, multi-band images, `n_depth > 1`, single-row/column images, and all `get_lerc_info` metadata fields.
+Coverage includes all eight pixel types (including lossy and lossless variants), validity masks, multi-band images, `n_depth > 1`, single-row/column images, all `get_lerc_info` metadata fields, and LERC1 blobs (all-valid, masked, lossy, lossless).
 
 ## Performance
 
@@ -131,7 +130,7 @@ pub fn get_lerc_info(src: &[u8]) -> Result<LercInfo, LercError>;
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `version` | `i32` | LERC2 version (1–6) |
+| `version` | `i32` | LERC version (0 for LERC1, 1–6 for LERC2) |
 | `n_cols` | `i32` | Image width |
 | `n_rows` | `i32` | Image height |
 | `n_depth` | `i32` | Values per pixel (spectral depth) |

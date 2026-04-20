@@ -729,3 +729,383 @@ fn get_lerc_info_float_metadata() {
         blob.len()
     );
 }
+
+// ---------------------------------------------------------------------------
+// Lerc1 tests (hand-crafted blobs; the reference C++ encoder only writes Lerc2)
+// ---------------------------------------------------------------------------
+
+/// Pack `values` (each `num_bits` wide) into the LE-uint32 MSB-first format
+/// used by the Lerc1/Lerc2-pre-v3 BitStuffer.
+///
+/// The C++ encoder packs each value at bit position `(32 - bitPos - numBits)` from the
+/// LSB of the current word (MSB-first within the word).  After packing, the last word
+/// is right-shifted by `ntbnn * 8` bits so the real data lands in its low bytes; only
+/// those `tail_bytes` low bytes are then written.  The decoder reverses this with a
+/// left-shift (tail shift).
+fn pack_msb_le_u32(values: &[u32], num_bits: usize) -> Vec<u8> {
+    if num_bits == 0 || values.is_empty() {
+        return vec![];
+    }
+    let total_bits = values.len() * num_bits;
+    let n_words = total_bits.div_ceil(32);
+    let mut words = vec![0u32; n_words];
+
+    let mut bit_pos: i32 = 0;
+    let mut word_idx = 0usize;
+    for &val in values {
+        let remaining = 32 - bit_pos;
+        if remaining >= num_bits as i32 {
+            words[word_idx] |= val << (remaining - num_bits as i32);
+            bit_pos += num_bits as i32;
+            if bit_pos == 32 {
+                bit_pos = 0;
+                word_idx += 1;
+            }
+        } else {
+            let overflow = num_bits as i32 - remaining;
+            words[word_idx] |= val >> overflow;
+            word_idx += 1;
+            words[word_idx] |= val << (32 - overflow);
+            bit_pos = overflow;
+        }
+    }
+
+    // Apply the tail right-shift to the last word (mirrors the decoder's left-shift).
+    let tail_bits = total_bits & 31;
+    let ntbnn = if tail_bits > 0 {
+        let tail_bytes = (tail_bits + 7) / 8;
+        4 - tail_bytes
+    } else {
+        0
+    };
+    if ntbnn > 0 {
+        words[n_words - 1] >>= ntbnn * 8;
+    }
+
+    // Write words as LE, omitting the last ntbnn (zero) bytes.
+    let n_bytes_to_write = n_words * 4 - ntbnn;
+    let mut out = Vec::with_capacity(n_bytes_to_write);
+    for w in &words {
+        out.extend_from_slice(&w.to_le_bytes());
+    }
+    out.truncate(n_bytes_to_write);
+    out
+}
+
+/// Build a minimal Lerc1 blob for a single-tile, all-valid image.
+///
+/// Layout:
+///   header | cnt-part (constant-all-valid) | z-part (1 tile, bit-stuffed)
+fn make_lerc1_blob(
+    width: usize,
+    height: usize,
+    z_vals: &[f32],
+    max_z_error: f64,
+) -> Vec<u8> {
+    assert_eq!(z_vals.len(), width * height);
+
+    let z_min = z_vals.iter().copied().fold(f32::INFINITY, f32::min);
+    let z_max = z_vals.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let inv_scale = 2.0 * max_z_error;
+
+    // Quantise each value to an unsigned integer.
+    let quant: Vec<u32> = z_vals
+        .iter()
+        .map(|&v| ((v - z_min) / inv_scale as f32).round() as u32)
+        .collect();
+    let max_quant = *quant.iter().max().unwrap_or(&0);
+
+    // Number of bits needed.
+    let num_bits = if max_quant == 0 {
+        0usize
+    } else {
+        (u32::BITS - max_quant.leading_zeros()) as usize
+    };
+
+    // Pack quantised values into LE-uint32 MSB-first format.
+    let n_pixels = width * height;
+    let packed = pack_msb_le_u32(&quant, num_bits);
+
+    // Bitstuffer block: [numBitsByte | numElements(4 bytes) | packed_data]
+    let mut bs: Vec<u8> = Vec::new();
+    bs.push(num_bits as u8); // bits67=0 → 4-byte numElements
+    bs.extend_from_slice(&(n_pixels as u32).to_le_bytes());
+    bs.extend_from_slice(&packed);
+
+    // Z-tile: raw_flag=1 (bit-stuffed, bits67=0 → 4-byte offset), offset=z_min as f32
+    let mut z_tile: Vec<u8> = Vec::new();
+    z_tile.push(0x01); // raw_flag
+    z_tile.extend_from_slice(&z_min.to_le_bytes());
+    z_tile.extend_from_slice(&bs);
+
+    let z_part_bytes = z_tile.len();
+
+    let mut blob: Vec<u8> = Vec::new();
+
+    // Header
+    blob.extend_from_slice(b"CntZImage ");
+    blob.extend_from_slice(&11i32.to_le_bytes()); // version
+    blob.extend_from_slice(&8i32.to_le_bytes()); // type CNT_Z
+    blob.extend_from_slice(&(height as i32).to_le_bytes());
+    blob.extend_from_slice(&(width as i32).to_le_bytes());
+    blob.extend_from_slice(&max_z_error.to_le_bytes());
+
+    // Cnt part: no tiling, constant 1.0 (all valid), numBytes=0
+    blob.extend_from_slice(&0i32.to_le_bytes()); // numTilesVert
+    blob.extend_from_slice(&0i32.to_le_bytes()); // numTilesHori
+    blob.extend_from_slice(&0i32.to_le_bytes()); // numBytes
+    blob.extend_from_slice(&1.0f32.to_le_bytes()); // maxCntInImg
+
+    // Z part: 1×1 tile
+    blob.extend_from_slice(&1i32.to_le_bytes()); // numTilesVert
+    blob.extend_from_slice(&1i32.to_le_bytes()); // numTilesHori
+    blob.extend_from_slice(&(z_part_bytes as i32).to_le_bytes());
+    blob.extend_from_slice(&z_max.to_le_bytes()); // maxZInImg
+    blob.extend_from_slice(&z_tile);
+
+    blob
+}
+
+/// Build a Lerc1 blob with an RLE-compressed validity mask.
+fn make_lerc1_blob_masked(
+    width: usize,
+    height: usize,
+    z_vals: &[f32],
+    mask: &[u8], // 1=valid, 0=invalid
+    max_z_error: f64,
+) -> Vec<u8> {
+    assert_eq!(z_vals.len(), width * height);
+    assert_eq!(mask.len(), width * height);
+
+    let n_pixels = width * height;
+    let inv_scale = 2.0 * max_z_error;
+
+    let z_min = z_vals
+        .iter()
+        .zip(mask.iter())
+        .filter(|&(_, &m)| m > 0)
+        .map(|(&v, _)| v)
+        .fold(f32::INFINITY, f32::min);
+    let z_max = z_vals
+        .iter()
+        .zip(mask.iter())
+        .filter(|&(_, &m)| m > 0)
+        .map(|(&v, _)| v)
+        .fold(f32::NEG_INFINITY, f32::max);
+
+    let quant: Vec<Option<u32>> = z_vals
+        .iter()
+        .zip(mask.iter())
+        .map(|(&v, &m)| {
+            if m > 0 {
+                Some(((v - z_min) / inv_scale as f32).round() as u32)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let max_quant = quant.iter().filter_map(|&q| q).max().unwrap_or(0);
+    let num_bits = if max_quant == 0 {
+        0usize
+    } else {
+        (u32::BITS - max_quant.leading_zeros()) as usize
+    };
+
+    // Pack valid-pixel quantised values into LE-uint32 MSB-first format.
+    let valid_quants: Vec<u32> = quant.iter().filter_map(|&q| q).collect();
+    let n_valid = valid_quants.len();
+    let packed = pack_msb_le_u32(&valid_quants, num_bits);
+
+    let mut bs: Vec<u8> = Vec::new();
+    bs.push(num_bits as u8);
+    bs.extend_from_slice(&(n_valid as u32).to_le_bytes());
+    bs.extend_from_slice(&packed);
+
+    let mut z_tile: Vec<u8> = Vec::new();
+    z_tile.push(0x01);
+    z_tile.extend_from_slice(&z_min.to_le_bytes());
+    z_tile.extend_from_slice(&bs);
+
+    let z_part_bytes = z_tile.len();
+
+    // Build RLE BitMask for the cnt part.
+    // BitMask layout: bit k at byte k>>3, bit 7-(k&7).
+    let bm_size = n_pixels.div_ceil(8);
+    let mut bm_bytes = vec![0u8; bm_size];
+    for k in 0..n_pixels {
+        if mask[k] > 0 {
+            bm_bytes[k >> 3] |= 1 << (7 - (k & 7));
+        }
+    }
+
+    // RLE-encode the bitmask bytes.
+    let mut rle: Vec<u8> = Vec::new();
+    let mut i = 0usize;
+    while i < bm_size {
+        // Find run of equal bytes.
+        let mut run = 1usize;
+        while i + run < bm_size && bm_bytes[i + run] == bm_bytes[i] && run < 32767 {
+            run += 1;
+        }
+        if run >= 3 {
+            // Even run: negative count.
+            let cnt = -(run as i16);
+            rle.extend_from_slice(&cnt.to_le_bytes());
+            rle.push(bm_bytes[i]);
+            i += run;
+        } else {
+            // Odd run: find how many non-repeating bytes.
+            let mut end = i;
+            while end < bm_size && end - i < 32767 {
+                let mut next_run = 1usize;
+                while end + next_run < bm_size
+                    && bm_bytes[end + next_run] == bm_bytes[end]
+                    && next_run < 3
+                {
+                    next_run += 1;
+                }
+                if next_run >= 3 {
+                    break;
+                }
+                end += 1;
+            }
+            let cnt = (end - i) as i16;
+            rle.extend_from_slice(&cnt.to_le_bytes());
+            rle.extend_from_slice(&bm_bytes[i..end]);
+            i = end;
+        }
+    }
+    // EOF marker.
+    rle.extend_from_slice(&i16::MIN.to_le_bytes());
+
+    let cnt_part_bytes = rle.len();
+
+    let mut blob: Vec<u8> = Vec::new();
+
+    blob.extend_from_slice(b"CntZImage ");
+    blob.extend_from_slice(&11i32.to_le_bytes());
+    blob.extend_from_slice(&8i32.to_le_bytes());
+    blob.extend_from_slice(&(height as i32).to_le_bytes());
+    blob.extend_from_slice(&(width as i32).to_le_bytes());
+    blob.extend_from_slice(&max_z_error.to_le_bytes());
+
+    // Cnt part: no tiling, RLE mask.
+    blob.extend_from_slice(&0i32.to_le_bytes());
+    blob.extend_from_slice(&0i32.to_le_bytes());
+    blob.extend_from_slice(&(cnt_part_bytes as i32).to_le_bytes());
+    blob.extend_from_slice(&1.0f32.to_le_bytes()); // maxCntInImg
+    blob.extend_from_slice(&rle);
+
+    // Z part: 1×1 tile.
+    blob.extend_from_slice(&1i32.to_le_bytes());
+    blob.extend_from_slice(&1i32.to_le_bytes());
+    blob.extend_from_slice(&(z_part_bytes as i32).to_le_bytes());
+    blob.extend_from_slice(&z_max.to_le_bytes());
+    blob.extend_from_slice(&z_tile);
+
+    blob
+}
+
+#[test]
+fn lerc1_all_valid_lossless() {
+    let width = 4usize;
+    let height = 4usize;
+    let pixels: Vec<f32> = (0..width * height).map(|i| i as f32).collect();
+    // Use a tiny error (true lossless would need invScale > 0 to encode).
+    let max_z_error = 0.001f64;
+    let blob = make_lerc1_blob(width, height, &pixels, max_z_error);
+    let result = lerc::decode(&blob).expect("lerc1 decode failed");
+
+    assert_eq!(result.info.version, 0, "expected Lerc1 version 0");
+    assert_eq!(result.info.n_cols, width as i32);
+    assert_eq!(result.info.n_rows, height as i32);
+    assert_eq!(result.info.n_bands, 1);
+    assert!(result.valid_pixels.is_none(), "expected all-valid");
+
+    let lerc::LercData::F32(out) = result.data else {
+        panic!("expected F32 data");
+    };
+    assert_eq!(out.len(), pixels.len());
+    for (i, (&a, &b)) in out.iter().zip(pixels.iter()).enumerate() {
+        assert!(
+            (a - b).abs() <= max_z_error as f32 + 1e-6,
+            "mismatch at {i}: got {a}, expected {b}"
+        );
+    }
+}
+
+#[test]
+fn lerc1_lossy() {
+    let width = 8usize;
+    let height = 8usize;
+    let max_z_error = 0.5f64;
+    let pixels: Vec<f32> = (0..width * height).map(|i| i as f32 * 0.7).collect();
+
+    let blob = make_lerc1_blob(width, height, &pixels, max_z_error);
+    let result = lerc::decode(&blob).expect("lerc1 lossy decode failed");
+
+    assert_eq!(result.info.version, 0);
+    assert!(result.valid_pixels.is_none());
+
+    let lerc::LercData::F32(out) = result.data else {
+        panic!("expected F32");
+    };
+    for (i, (&a, &b)) in out.iter().zip(pixels.iter()).enumerate() {
+        assert!(
+            (a - b).abs() <= max_z_error as f32 + 1e-6,
+            "value mismatch at {i}: {a} vs {b}"
+        );
+    }
+}
+
+#[test]
+fn lerc1_with_mask() {
+    let width = 4usize;
+    let height = 4usize;
+    let max_z_error = 0.5f64;
+    let pixels: Vec<f32> = (0..width * height).map(|i| i as f32 * 1.5 + 1.0).collect();
+    let mask: Vec<u8> = (0..width * height)
+        .map(|i| if i % 3 == 0 { 0u8 } else { 1u8 })
+        .collect();
+
+    let blob = make_lerc1_blob_masked(width, height, &pixels, &mask, max_z_error);
+    let result = lerc::decode(&blob).expect("lerc1 masked decode failed");
+
+    assert_eq!(result.info.version, 0);
+    let valid_mask = result.valid_pixels.expect("expected a mask");
+    assert_eq!(valid_mask, mask);
+
+    let lerc::LercData::F32(out) = result.data else {
+        panic!("expected F32");
+    };
+    for (i, (&a, &b)) in out.iter().zip(pixels.iter()).enumerate() {
+        if mask[i] > 0 {
+            assert!(
+                (a - b).abs() <= max_z_error as f32 + 1e-6,
+                "value mismatch at valid pixel {i}: {a} vs {b}"
+            );
+        }
+    }
+}
+
+#[test]
+fn lerc1_get_lerc_info() {
+    let width = 6usize;
+    let height = 6usize;
+    let max_z_error = 0.25f64;
+    let pixels: Vec<f32> = (0..width * height).map(|i| i as f32).collect();
+
+    let blob = make_lerc1_blob(width, height, &pixels, max_z_error);
+    let info = lerc::get_lerc_info(&blob).expect("get_lerc_info failed");
+
+    assert_eq!(info.version, 0);
+    assert_eq!(info.n_cols, width as i32);
+    assert_eq!(info.n_rows, height as i32);
+    assert_eq!(info.n_bands, 1);
+    assert_eq!(info.n_depth, 1);
+    assert_eq!(info.num_valid_pixel, (width * height) as i32);
+    assert_eq!(info.data_type, lerc::DataType::F32);
+    assert!(info.max_z_error <= max_z_error + 1e-9);
+    assert_eq!(info.blob_size as usize, blob.len());
+}

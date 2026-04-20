@@ -4,6 +4,7 @@ pub mod types;
 mod bitmask;
 mod bitstuffer;
 mod huffman;
+mod lerc1;
 mod lerc2;
 mod lossless_float;
 mod rle;
@@ -17,7 +18,11 @@ pub use types::{DataType, DecodedData, LercData, LercInfo};
 /// # Errors
 /// Returns `LercError` on malformed, truncated, or unsupported blobs.
 pub fn decode(src: &[u8]) -> Result<DecodedData, LercError> {
-    lerc2::decode(src)
+    if lerc1::is_lerc1(src) {
+        lerc1::decode(src)
+    } else {
+        lerc2::decode(src)
+    }
 }
 
 /// Parse metadata from a LERC blob without decoding pixel data.
@@ -25,5 +30,9 @@ pub fn decode(src: &[u8]) -> Result<DecodedData, LercError> {
 /// # Errors
 /// Returns `LercError` on malformed or unsupported blobs.
 pub fn get_lerc_info(src: &[u8]) -> Result<LercInfo, LercError> {
-    lerc2::get_lerc_info(src)
+    if lerc1::is_lerc1(src) {
+        lerc1::get_lerc_info(src)
+    } else {
+        lerc2::get_lerc_info(src)
+    }
 }

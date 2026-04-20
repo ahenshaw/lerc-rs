@@ -88,8 +88,8 @@ fn bit_unstuff_v3(
     true
 }
 
-/// BitUnStuff pre-v3 (Lerc2 v1/v2): bits packed MSB-first within LE uint32 words.
-fn bit_unstuff_pre_v3(
+/// BitUnStuff pre-v3 (Lerc2 v1/v2 and Lerc1): bits packed MSB-first within LE uint32 words.
+pub(crate) fn bit_unstuff_pre_v3(
     src: &[u8],
     pos: &mut usize,
     num_elem: usize,
