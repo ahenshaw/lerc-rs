@@ -107,8 +107,9 @@ Benchmarked against the reference C library (`lerc` crate v0.2.1 wrapping Esri's
 | f32 1024×1024 lossless (1 MP) | 16.5 ms | 17.4 ms | 0.95× |
 | f64 1024×1024 lossy (1 MP) | 12.8 ms | 3.6 ms | 3.5× |
 | u8 1024×1024 × 3 bands | 18.1 ms | 12.4 ms | 1.5× |
+| LERC1 f32 1024×1024 lossy | 8.5 ms | 10.3 ms | 0.82× |
 
-The f32 lossless path is now slightly faster than C++. The remaining gaps are in the bitstuffer path (lossy integer/float types) and f64 lossy decode (the C++ reference uses AVX2 SIMD).
+The f32 lossless and LERC1 paths are faster than C++. The remaining gaps are in the bitstuffer path (lossy integer/float types) and f64 lossy decode (the C++ reference uses AVX2 SIMD).
 
 ## API
 
