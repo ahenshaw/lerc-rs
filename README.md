@@ -2,6 +2,8 @@
 
 A decode-only Rust implementation of [LERC](https://github.com/Esri/lerc) (Limited Error Raster Compression), Esri's format for compressing raster and point-cloud data with a configurable per-pixel error bound.
 
+The vast majority of the code was created by an LLM converting the original C++ code.  The implementation is tested against a suite of test cases referenced against the original library.
+
 No external dependencies.
 
 ## Supported formats
