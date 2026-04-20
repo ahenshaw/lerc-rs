@@ -3,6 +3,9 @@ name = "lerc-rs"
 version = "0.2.1"
 edition = "2024"
 authors = ["Andrew M. Henshaw <andrew@henshaw.us>",]
+repository = "https://github.com/ahenshaw/lerc-rs"
+description = "A decode-only Rust implementation of [LERC](https://github.com/Esri/lerc) (Limited Error Raster Compression), Esri's format for compressing raster and point-cloud data."
+license-file = "LICENSE"
 
 [lib]
 name = "lerc"
