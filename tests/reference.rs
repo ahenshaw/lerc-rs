@@ -347,3 +347,359 @@ fn single_pixel() {
     };
     assert_eq!(out, pixels);
 }
+
+// ---------------------------------------------------------------------------
+// Data-type coverage
+// ---------------------------------------------------------------------------
+
+/// Lossless u32 image — the only data type with no other test coverage.
+#[test]
+fn u32_all_valid_lossless() {
+    let width = 8usize;
+    let height = 8usize;
+    let pixels: Vec<u32> = (0..width * height).map(|i| i as u32 * 12345).collect();
+
+    let blob = ref_encode(&pixels, None, width, height, 1, 1, 0.0);
+    let result = lerc::decode(&blob).expect("our decode failed");
+
+    let lerc::LercData::U32(out) = result.data else {
+        panic!("expected U32, got {:?}", result.info.data_type);
+    };
+    assert_eq!(out, pixels);
+}
+
+/// Lossless f64 with non-trivial values (bit-exact round-trip check).
+/// Complements `f64_all_valid_lossless` which only uses simple linear values.
+#[test]
+fn f64_lossless_varied() {
+    let width = 32usize;
+    let height = 32usize;
+    let pixels: Vec<f64> = (0..width * height)
+        .map(|i| (i as f64 * 1.234_567_890_123_4).sin() * 1000.0)
+        .collect();
+
+    let blob = ref_encode(&pixels, None, width, height, 1, 1, 0.0);
+    let result = lerc::decode(&blob).expect("our decode failed");
+
+    let lerc::LercData::F64(out) = result.data else {
+        panic!("expected F64, got {:?}", result.info.data_type);
+    };
+    for (i, (&a, &b)) in out.iter().zip(pixels.iter()).enumerate() {
+        assert_eq!(
+            a.to_bits(), b.to_bits(),
+            "bit mismatch at index {i}: {a} vs {b}"
+        );
+    }
+}
+
+/// Lossy f64 — only lossless was tested before.
+#[test]
+fn f64_lossy() {
+    let width = 16usize;
+    let height = 16usize;
+    let max_z_error = 0.5f64;
+    let pixels: Vec<f64> = (0..width * height).map(|i| i as f64 * 0.3).collect();
+
+    let blob = ref_encode(&pixels, None, width, height, 1, 1, max_z_error);
+    let result = lerc::decode(&blob).expect("our decode failed");
+
+    let lerc::LercData::F64(out) = result.data else {
+        panic!("expected F64, got {:?}", result.info.data_type);
+    };
+    // Add a small epsilon: floating-point subtraction of values like 4.4 - 3.9
+    // can exceed 0.5 by a ULP due to IEEE 754 rounding.
+    assert_approx_eq_f64(&out, &pixels, max_z_error + 1e-10);
+}
+
+// ---------------------------------------------------------------------------
+// Huffman integer path
+// ---------------------------------------------------------------------------
+
+/// u8 with max_z_error=0.5 forces the Huffman-integer encode path
+/// (`try_huffman_int`).  The lossless u8 tests use max_z_error=0.0 and go
+/// through the bitstuffer instead, so this path would otherwise be uncovered.
+/// For u8, error=0.5 is effectively lossless (integer values round-trip exactly).
+#[test]
+fn u8_huffman_int_path() {
+    let width = 32usize;
+    let height = 32usize;
+    let pixels: Vec<u8> = (0..width * height).map(|i| (i * 7 % 256) as u8).collect();
+
+    let blob = ref_encode(&pixels, None, width, height, 1, 1, 0.5);
+    let result = lerc::decode(&blob).expect("our decode failed");
+
+    let lerc::LercData::U8(out) = result.data else {
+        panic!("expected U8, got {:?}", result.info.data_type);
+    };
+    assert_eq!(out, pixels);
+}
+
+/// i8 with max_z_error=0.5 — same Huffman integer path, signed type.
+#[test]
+fn i8_huffman_int_path() {
+    let width = 16usize;
+    let height = 16usize;
+    let pixels: Vec<i8> = (0..width * height)
+        .map(|i| (i as i32 * 3 - 64) as i8)
+        .collect();
+
+    let blob = ref_encode(&pixels, None, width, height, 1, 1, 0.5);
+    let result = lerc::decode(&blob).expect("our decode failed");
+
+    let lerc::LercData::I8(out) = result.data else {
+        panic!("expected I8, got {:?}", result.info.data_type);
+    };
+    assert_eq!(out, pixels);
+}
+
+// ---------------------------------------------------------------------------
+// Lossy integer types
+// ---------------------------------------------------------------------------
+
+/// Lossy i16 — only f32 lossy was tested before.
+#[test]
+fn i16_lossy() {
+    let width = 16usize;
+    let height = 16usize;
+    let max_z_error = 1.0f64;
+    let pixels: Vec<i16> = (0..width * height)
+        .map(|i| (i as i32 * 17 - 1000) as i16)
+        .collect();
+
+    let blob = ref_encode(&pixels, None, width, height, 1, 1, max_z_error);
+    let result = lerc::decode(&blob).expect("our decode failed");
+
+    let lerc::LercData::I16(out) = result.data else {
+        panic!("expected I16, got {:?}", result.info.data_type);
+    };
+    for (i, (&a, &b)) in out.iter().zip(pixels.iter()).enumerate() {
+        assert!(
+            (a as i32 - b as i32).abs() <= max_z_error as i32,
+            "i16 mismatch at {i}: {a} vs {b} (max_z_error={max_z_error})"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Mask combinations
+// ---------------------------------------------------------------------------
+
+/// f32 lossy with a validity mask — lossy and mask had not been combined.
+#[test]
+fn f32_lossy_with_mask() {
+    let width = 12usize;
+    let height = 10usize;
+    let n = width * height;
+    let max_z_error = 0.5f64;
+    let pixels: Vec<f32> = (0..n).map(|i| i as f32 * 0.1).collect();
+    let mask: Vec<u8> = (0..n).map(|i| if i % 4 == 0 { 0 } else { 1 }).collect();
+
+    let blob = ref_encode(&pixels, Some(&mask), width, height, 1, 1, max_z_error);
+    let result = lerc::decode(&blob).expect("our decode failed");
+
+    let lerc::LercData::F32(out) = result.data else {
+        panic!("expected F32, got {:?}", result.info.data_type);
+    };
+    let vm = result.valid_pixels.expect("expected mask in output");
+    assert_eq!(vm.len(), n, "mask length mismatch");
+    for i in 0..n {
+        assert_eq!(vm[i], mask[i], "mask mismatch at {i}");
+        if mask[i] == 1 {
+            assert!(
+                (out[i] - pixels[i]).abs() <= max_z_error as f32,
+                "value mismatch at valid pixel {i}: {} vs {}",
+                out[i], pixels[i]
+            );
+        }
+    }
+}
+
+/// i16 lossless with a mask — mask was previously only tested for u8.
+#[test]
+fn i16_with_mask() {
+    let width = 10usize;
+    let height = 8usize;
+    let n = width * height;
+    let pixels: Vec<i16> = (0..n).map(|i| (i as i16) * 100 - 4000).collect();
+    let mask: Vec<u8> = (0..n).map(|i| if i % 5 == 0 { 0 } else { 1 }).collect();
+
+    let blob = ref_encode(&pixels, Some(&mask), width, height, 1, 1, 0.0);
+    let result = lerc::decode(&blob).expect("our decode failed");
+
+    let lerc::LercData::I16(out) = result.data else {
+        panic!("expected I16, got {:?}", result.info.data_type);
+    };
+    let vm = result.valid_pixels.expect("expected mask in output");
+    assert_eq!(vm.len(), n, "mask length mismatch");
+    for i in 0..n {
+        assert_eq!(vm[i], mask[i], "mask mismatch at {i}");
+        if mask[i] == 1 {
+            assert_eq!(out[i], pixels[i], "value mismatch at valid pixel {i}");
+        }
+    }
+}
+
+/// Multi-band image with a shared validity mask.
+#[test]
+fn multiband_with_mask() {
+    let width = 8usize;
+    let height = 8usize;
+    let n_bands = 2usize;
+    let n = width * height;
+    let pixels: Vec<u8> =
+        (0..n * n_bands).map(|i| (i * 13 % 256) as u8).collect();
+    let mask: Vec<u8> = (0..n).map(|i| if i % 3 == 0 { 0 } else { 1 }).collect();
+
+    let blob = ref_encode(&pixels, Some(&mask), width, height, 1, n_bands, 0.0);
+    let result = lerc::decode(&blob).expect("our decode failed");
+
+    let lerc::LercData::U8(out) = result.data else {
+        panic!("expected U8, got {:?}", result.info.data_type);
+    };
+    assert_eq!(result.info.n_bands, n_bands as i32);
+    let vm = result.valid_pixels.expect("expected mask in output");
+    // Mask covers n_rows*n_cols per the n_masks=1 (shared) case.
+    assert_eq!(vm.len(), n, "mask length mismatch");
+    for i in 0..n {
+        assert_eq!(vm[i], mask[i], "mask mismatch at pixel {i}");
+        if mask[i] == 1 {
+            // Band-0 pixel.
+            assert_eq!(out[i], pixels[i], "band-0 value mismatch at {i}");
+            // Band-1 pixel (offset by n).
+            assert_eq!(out[n + i], pixels[n + i], "band-1 value mismatch at {i}");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Multi-band float
+// ---------------------------------------------------------------------------
+
+/// f32 lossless multiband — float multiband had not been tested.
+#[test]
+fn f32_multiband_lossless() {
+    let width = 8usize;
+    let height = 8usize;
+    let n_bands = 2usize;
+    let n = width * height * n_bands;
+    let pixels: Vec<f32> = (0..n).map(|i| i as f32 * 0.5 - 32.0).collect();
+
+    let blob = ref_encode(&pixels, None, width, height, 1, n_bands, 0.0);
+    let result = lerc::decode(&blob).expect("our decode failed");
+
+    let lerc::LercData::F32(out) = result.data else {
+        panic!("expected F32, got {:?}", result.info.data_type);
+    };
+    assert_eq!(result.info.n_bands, n_bands as i32);
+    assert_eq!(out, pixels, "f32 multiband lossless round-trip failed");
+}
+
+// ---------------------------------------------------------------------------
+// Depth (n_depth > 1)
+// ---------------------------------------------------------------------------
+
+/// Image with depth=2 (two values per pixel).  Exercises the n_depth layout
+/// path: index = row * n_cols * n_depth + col * n_depth + d.
+#[test]
+fn depth_2_u8() {
+    let width = 6usize;
+    let height = 5usize;
+    let depth = 2usize;
+    let n = width * height * depth;
+    let pixels: Vec<u8> = (0..n).map(|i| (i * 17 % 256) as u8).collect();
+
+    let blob = ref_encode(&pixels, None, width, height, depth, 1, 0.0);
+    let result = lerc::decode(&blob).expect("our decode failed");
+
+    let lerc::LercData::U8(out) = result.data else {
+        panic!("expected U8, got {:?}", result.info.data_type);
+    };
+    assert_eq!(result.info.n_depth, depth as i32);
+    assert_eq!(out, pixels);
+}
+
+/// f32 lossless with depth=2 — exercises the dimension-flip in
+/// `decode_lossless_f32` (iw=n_depth, ih=n_cols*n_rows when n_depth>1).
+#[test]
+fn depth_2_f32_lossless() {
+    let width = 6usize;
+    let height = 5usize;
+    let depth = 2usize;
+    let n = width * height * depth;
+    let pixels: Vec<f32> = (0..n).map(|i| i as f32 * 1.5 - 20.0).collect();
+
+    let blob = ref_encode(&pixels, None, width, height, depth, 1, 0.0);
+    let result = lerc::decode(&blob).expect("our decode failed");
+
+    let lerc::LercData::F32(out) = result.data else {
+        panic!("expected F32, got {:?}", result.info.data_type);
+    };
+    assert_eq!(result.info.n_depth, depth as i32);
+    assert_eq!(out, pixels, "f32 depth=2 lossless round-trip failed");
+}
+
+// ---------------------------------------------------------------------------
+// Dimension edge cases
+// ---------------------------------------------------------------------------
+
+/// 1-row image.
+#[test]
+fn single_row() {
+    let pixels: Vec<u8> = (0..16).map(|i| (i * 11 % 256) as u8).collect();
+    let blob = ref_encode(&pixels, None, 16, 1, 1, 1, 0.0);
+    let result = lerc::decode(&blob).expect("our decode failed");
+    let lerc::LercData::U8(out) = result.data else {
+        panic!("expected U8, got {:?}", result.info.data_type);
+    };
+    assert_eq!(out, pixels);
+}
+
+/// 1-column image.
+#[test]
+fn single_col() {
+    let pixels: Vec<u8> = (0..16).map(|i| (i * 13 % 256) as u8).collect();
+    let blob = ref_encode(&pixels, None, 1, 16, 1, 1, 0.0);
+    let result = lerc::decode(&blob).expect("our decode failed");
+    let lerc::LercData::U8(out) = result.data else {
+        panic!("expected U8, got {:?}", result.info.data_type);
+    };
+    assert_eq!(out, pixels);
+}
+
+// ---------------------------------------------------------------------------
+// get_lerc_info metadata fields
+// ---------------------------------------------------------------------------
+
+/// z_min, z_max, max_z_error, version, and blob_size are parsed correctly.
+#[test]
+fn get_lerc_info_float_metadata() {
+    let width = 8usize;
+    let height = 8usize;
+    let max_z_error = 0.25f64;
+    let pixels: Vec<f32> = (0..width * height).map(|i| i as f32 * 1.5).collect();
+    let expected_min = *pixels.first().unwrap() as f64; // 0.0
+    let expected_max = *pixels.last().unwrap() as f64;  // 94.5
+
+    let blob = ref_encode(&pixels, None, width, height, 1, 1, max_z_error);
+    let info = lerc::get_lerc_info(&blob).expect("get_lerc_info failed");
+
+    assert_eq!(info.data_type, lerc::DataType::F32);
+    // z_min / z_max bracket the input range within the allowed error.
+    assert!(
+        info.z_min <= expected_min + max_z_error + 1e-9,
+        "z_min {} too large (expected ≤ {})", info.z_min, expected_min + max_z_error
+    );
+    assert!(
+        info.z_max >= expected_max - max_z_error - 1e-9,
+        "z_max {} too small (expected ≥ {})", info.z_max, expected_max - max_z_error
+    );
+    assert!(
+        info.max_z_error <= max_z_error + 1e-9,
+        "max_z_error {} > {}", info.max_z_error, max_z_error
+    );
+    assert!(info.version >= 1, "expected LERC2 version ≥ 1, got {}", info.version);
+    assert_eq!(
+        info.blob_size as usize, blob.len(),
+        "blob_size mismatch: {} vs actual {}", info.blob_size, blob.len()
+    );
+}

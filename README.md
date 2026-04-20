@@ -83,6 +83,18 @@ match lerc::decode(&blob) {
 }
 ```
 
+## Testing
+
+Integration tests in `tests/reference.rs` encode with the reference C++ library (`lerc` crate v0.2.1) and decode with this library, comparing pixel values, validity masks, and metadata.
+
+```bash
+LIBCLANG_PATH=/usr/lib/llvm-18/lib cargo test --test reference
+```
+
+The `LIBCLANG_PATH` env var is required because the reference crate uses bindgen.
+
+Coverage includes all eight pixel types (including lossy and lossless variants), validity masks, multi-band images, `n_depth > 1`, single-row/column images, and all `get_lerc_info` metadata fields.
+
 ## Performance
 
 Benchmarked against the reference C library (`lerc` crate v0.2.1 wrapping Esri's C++ LERC) on an x86-64 Linux host with AVX2, release build (`cargo bench`).

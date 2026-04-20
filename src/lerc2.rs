@@ -426,6 +426,7 @@ fn read_mask(
     n_rows: i32,
     n_cols: i32,
     num_valid: i32,
+    prev_mask: Option<&BitMask>,
 ) -> Result<BitMask, LercError> {
     if *pos + 4 > src.len() {
         return Err(LercError::TruncatedBlob);
@@ -452,9 +453,15 @@ fn read_mask(
         }
         rle::rle_decompress(&src[*pos..*pos + nb], mask.bits_mut())?;
         *pos += nb;
+    } else {
+        // num_bytes_mask == 0, not all-valid/invalid: inherit the previous
+        // band's mask (LERC2 n_masks=1 multiband format reuses band-0's mask).
+        if let Some(prev) = prev_mask {
+            mask.bits_mut().copy_from_slice(prev.bits());
+        }
+        // If no previous mask is available the mask stays all-invalid, which
+        // matches the C++ behavior when the blob is malformed.
     }
-    // else: num_bytes_mask == 0 but not all-valid/invalid → retain previous
-    // mask (not used in single-band decoding; the caller supplies fresh masks).
 
     Ok(mask)
 }
@@ -907,6 +914,7 @@ fn decode_huffman<T: LercScalar>(
 fn decode_band_impl<T: LercScalar>(
     src: &[u8],
     blob_start: usize,
+    prev_mask: Option<&BitMask>,
 ) -> Result<(Vec<T>, BitMask, HeaderInfo), LercError> {
     let blob = &src[blob_start..];
     let mut pos = 0usize;
@@ -930,8 +938,10 @@ fn decode_band_impl<T: LercScalar>(
         }
     }
 
-    // Read bit-mask.
-    let mask = read_mask(blob, &mut pos, hd.n_rows, hd.n_cols, hd.num_valid_pixel)?;
+    // Read bit-mask.  For multiband blobs with n_masks=1, subsequent bands store
+    // num_bytes_mask=0 to signal "same mask as previous band"; prev_mask carries
+    // that mask forward.
+    let mask = read_mask(blob, &mut pos, hd.n_rows, hd.n_cols, hd.num_valid_pixel, prev_mask)?;
 
     // Allocate pixel buffer (zero-initialized).
     let n_total = hd.n_rows as usize * hd.n_cols as usize * hd.n_depth as usize;
@@ -1100,38 +1110,39 @@ fn decode_band_dispatch(
     src: &[u8],
     blob_start: usize,
     dt: DataType,
+    prev_mask: Option<&BitMask>,
 ) -> Result<(BandResult, BitMask, HeaderInfo), LercError> {
     match dt {
         DataType::I8 => {
-            let (d, m, h) = decode_band_impl::<i8>(src, blob_start)?;
+            let (d, m, h) = decode_band_impl::<i8>(src, blob_start, prev_mask)?;
             Ok((BandResult::I8(d), m, h))
         }
         DataType::U8 => {
-            let (d, m, h) = decode_band_impl::<u8>(src, blob_start)?;
+            let (d, m, h) = decode_band_impl::<u8>(src, blob_start, prev_mask)?;
             Ok((BandResult::U8(d), m, h))
         }
         DataType::I16 => {
-            let (d, m, h) = decode_band_impl::<i16>(src, blob_start)?;
+            let (d, m, h) = decode_band_impl::<i16>(src, blob_start, prev_mask)?;
             Ok((BandResult::I16(d), m, h))
         }
         DataType::U16 => {
-            let (d, m, h) = decode_band_impl::<u16>(src, blob_start)?;
+            let (d, m, h) = decode_band_impl::<u16>(src, blob_start, prev_mask)?;
             Ok((BandResult::U16(d), m, h))
         }
         DataType::I32 => {
-            let (d, m, h) = decode_band_impl::<i32>(src, blob_start)?;
+            let (d, m, h) = decode_band_impl::<i32>(src, blob_start, prev_mask)?;
             Ok((BandResult::I32(d), m, h))
         }
         DataType::U32 => {
-            let (d, m, h) = decode_band_impl::<u32>(src, blob_start)?;
+            let (d, m, h) = decode_band_impl::<u32>(src, blob_start, prev_mask)?;
             Ok((BandResult::U32(d), m, h))
         }
         DataType::F32 => {
-            let (d, m, h) = decode_band_impl::<f32>(src, blob_start)?;
+            let (d, m, h) = decode_band_impl::<f32>(src, blob_start, prev_mask)?;
             Ok((BandResult::F32(d), m, h))
         }
         DataType::F64 => {
-            let (d, m, h) = decode_band_impl::<f64>(src, blob_start)?;
+            let (d, m, h) = decode_band_impl::<f64>(src, blob_start, prev_mask)?;
             Ok((BandResult::F64(d), m, h))
         }
     }
@@ -1251,15 +1262,19 @@ pub fn decode(src: &[u8]) -> Result<DecodedData, LercError> {
     let n_elem = n_pix * info.n_depth as usize;
     let n_bands = info.n_bands as usize;
 
-    // Decode each band.
+    // Decode each band.  prev_mask carries the previous band's BitMask so that
+    // subsequent bands with num_bytes_mask=0 (n_masks=1 shared-mask format) can
+    // inherit it rather than decoding as all-invalid.
     let mut blob_offset: usize = 0;
     let mut band_data: Vec<BandResult> = Vec::with_capacity(n_bands);
     let mut band_masks: Vec<Vec<u8>> = Vec::with_capacity(n_bands);
     let mut no_data_values: Vec<f64> = vec![0.0; n_bands];
     let mut any_no_data = false;
+    let mut prev_mask: Option<BitMask> = None;
 
     for _ib in 0..n_bands {
-        let (band, mask, hd) = decode_band_dispatch(src, blob_offset, info.data_type)?;
+        let (band, mask, hd) =
+            decode_band_dispatch(src, blob_offset, info.data_type, prev_mask.as_ref())?;
         blob_offset += hd.blob_size as usize;
 
         band_masks.push(mask_to_bytes(&mask));
@@ -1270,6 +1285,7 @@ pub fn decode(src: &[u8]) -> Result<DecodedData, LercError> {
         }
 
         band_data.push(band);
+        prev_mask = Some(mask);
     }
 
     // Merge per-band pixel data into one flat array.
