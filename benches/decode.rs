@@ -97,6 +97,40 @@ fn make_blob<T: ref_lerc::LercDataType>(
         .expect("reference encode failed")
 }
 
+/// Build a LERC1 blob using raw f32 storage (compr_flag=0), the lossless path.
+fn make_lerc1_blob_f32_lossless(width: usize, height: usize, pixels: &[f32]) -> Vec<u8> {
+    let z_max = pixels.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let n = width * height;
+
+    // Z-tile: raw_flag=0, one f32 per pixel.
+    let mut z_tile = vec![0x00u8];
+    for &v in pixels {
+        z_tile.extend_from_slice(&v.to_le_bytes());
+    }
+    let z_bytes = z_tile.len();
+
+    let mut blob = Vec::new();
+    blob.extend_from_slice(b"CntZImage ");
+    blob.extend_from_slice(&11i32.to_le_bytes());
+    blob.extend_from_slice(&8i32.to_le_bytes());
+    blob.extend_from_slice(&(height as i32).to_le_bytes());
+    blob.extend_from_slice(&(width as i32).to_le_bytes());
+    blob.extend_from_slice(&0.0f64.to_le_bytes()); // max_z_error = 0 (lossless)
+    // Cnt part: constant all-valid
+    blob.extend_from_slice(&0i32.to_le_bytes());
+    blob.extend_from_slice(&0i32.to_le_bytes());
+    blob.extend_from_slice(&0i32.to_le_bytes());
+    blob.extend_from_slice(&1.0f32.to_le_bytes());
+    // Z part: 1×1 tile
+    blob.extend_from_slice(&1i32.to_le_bytes());
+    blob.extend_from_slice(&1i32.to_le_bytes());
+    blob.extend_from_slice(&(z_bytes as i32).to_le_bytes());
+    blob.extend_from_slice(&z_max.to_le_bytes());
+    blob.extend_from_slice(&z_tile);
+    let _ = n;
+    blob
+}
+
 fn bench_decode(c: &mut Criterion) {
     // -----------------------------------------------------------------
     // Fixtures
@@ -139,6 +173,12 @@ fn bench_decode(c: &mut Criterion) {
     // LERC1 f32 1 MP (lossy).
     let pixels_lerc1: Vec<f32> = (0..w_lg * h_lg).map(|i| (i as f32) * 0.3).collect();
     let blob_lerc1 = make_lerc1_blob_f32(w_lg, h_lg, &pixels_lerc1, 0.5);
+
+    // LERC1 f32 1 MP (lossless – raw f32 path).
+    let pixels_lerc1_ll: Vec<f32> = (0..w_lg * h_lg)
+        .map(|i| (i as f32 * 1.234_567_8).sin() * 1000.0)
+        .collect();
+    let blob_lerc1_ll = make_lerc1_blob_f32_lossless(w_lg, h_lg, &pixels_lerc1_ll);
 
     // -----------------------------------------------------------------
     // u8 small
@@ -221,6 +261,18 @@ fn bench_decode(c: &mut Criterion) {
     });
     g.bench_function("lerc-ref", |b| {
         b.iter(|| ref_lerc::decode_auto::<u8>(black_box(&blob_u8_3band)).unwrap())
+    });
+    g.finish();
+
+    // -----------------------------------------------------------------
+    // LERC1 f32 1 MP (lossless)
+    // -----------------------------------------------------------------
+    let mut g = c.benchmark_group("lerc1_f32_1mp_lossless_1024x1024");
+    g.bench_function("lerc-rs", |b| {
+        b.iter(|| lerc::decode(black_box(&blob_lerc1_ll)).unwrap())
+    });
+    g.bench_function("lerc-ref", |b| {
+        b.iter(|| ref_lerc::decode_auto::<f32>(black_box(&blob_lerc1_ll)).unwrap())
     });
     g.finish();
 
