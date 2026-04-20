@@ -98,21 +98,21 @@ Coverage includes all eight pixel types (including lossy and lossless variants),
 
 ## Performance
 
-Benchmarked against the reference C library (`lerc` crate v0.2.1 wrapping Esri's C++ LERC) on an x86-64 Linux host with AVX2, release build (`cargo bench`).
+Benchmarked against the reference C library (`lerc` crate v0.2.1 wrapping Esri's C++ LERC) and `lerc-rs` v0.1.1 (NathanHowell, pure Rust) on an x86-64 Linux host with AVX2, release build (`cargo bench`).
 
-| Fixture | lerc-rs | lerc (C++) | Ratio |
-|---------|--------:|----------:|------:|
-| u8 16×16 (per-call overhead) | 6.5 µs | 2.8 µs | 2.3× |
-| u8 1024×1024 (1 MP) | 6.1 ms | 4.2 ms | 1.4× |
-| i16 1024×1024 (1 MP) | 7.9 ms | 4.8 ms | 1.7× |
-| f32 1024×1024 lossy (1 MP) | 6.5 ms | 3.3 ms | 1.9× |
-| f32 1024×1024 lossless (1 MP) | 16.5 ms | 17.4 ms | 0.95× |
-| f64 1024×1024 lossy (1 MP) | 12.8 ms | 3.6 ms | 3.5× |
-| u8 1024×1024 × 3 bands | 18.1 ms | 12.4 ms | 1.5× |
-| LERC1 f32 1024×1024 lossy | 8.5 ms | 17.7 ms | 0.48× |
-| LERC1 f32 1024×1024 lossless | 3.0 ms | 6.0 ms | 0.50× |
+| Fixture | lerc-rs | lerc (C++) | lerc-rs v0.1.1 |
+|---------|--------:|----------:|---------------:|
+| u8 16×16 (per-call overhead) | 6.7 µs | 3.0 µs | 5.4 µs |
+| u8 1024×1024 (1 MP) | 7.1 ms | 4.6 ms | 16.2 ms |
+| i16 1024×1024 (1 MP) | 8.7 ms | 5.2 ms | 4.4 ms |
+| f32 1024×1024 lossy (1 MP) | 6.7 ms | 3.6 ms | 6.3 ms |
+| f32 1024×1024 lossless (1 MP) | 17.5 ms | 18.3 ms | 24.3 ms |
+| f64 1024×1024 lossy (1 MP) | 14.2 ms | 4.2 ms | 6.3 ms |
+| u8 1024×1024 × 3 bands | 19.2 ms | 15.1 ms | 50.4 ms |
+| LERC1 f32 1024×1024 lossy | 9.3 ms | 20.1 ms | 10.4 ms |
+| LERC1 f32 1024×1024 lossless | 3.3 ms | 6.6 ms | 6.0 ms |
 
-The f32 lossless and LERC1 paths are faster than C++. The remaining gaps are in the bitstuffer path (lossy integer/float types) and f64 lossy decode (the C++ reference uses AVX2 SIMD).
+This implementation leads on f32 lossless (LERC2 and LERC1) and is competitive on most other paths. The C++ reference holds an edge on lossy integer/float types (AVX2 SIMD) and f64 lossy decode.
 
 ## API
 

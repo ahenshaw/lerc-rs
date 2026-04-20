@@ -4,6 +4,7 @@
 /// both decoders are timed against the same blob.
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use lerc_ref as ref_lerc;
+use lerc_howell as howell;
 
 /// Build a LERC1 (CntZImage) blob for a 1-tile all-valid f32 image.
 /// Mirrors the C++ BitStuff_Before_Lerc2v3 format: pack MSB-first into
@@ -190,6 +191,9 @@ fn bench_decode(c: &mut Criterion) {
     g.bench_function("lerc-ref", |b| {
         b.iter(|| ref_lerc::decode_auto::<u8>(black_box(&blob_u8_sm)).unwrap())
     });
+    g.bench_function("lerc-howell", |b| {
+        b.iter(|| howell::decode_slice::<u8>(black_box(&blob_u8_sm)).unwrap())
+    });
     g.finish();
 
     // -----------------------------------------------------------------
@@ -201,6 +205,9 @@ fn bench_decode(c: &mut Criterion) {
     });
     g.bench_function("lerc-ref", |b| {
         b.iter(|| ref_lerc::decode_auto::<u8>(black_box(&blob_u8_lg)).unwrap())
+    });
+    g.bench_function("lerc-howell", |b| {
+        b.iter(|| howell::decode_slice::<u8>(black_box(&blob_u8_lg)).unwrap())
     });
     g.finish();
 
@@ -214,6 +221,9 @@ fn bench_decode(c: &mut Criterion) {
     g.bench_function("lerc-ref", |b| {
         b.iter(|| ref_lerc::decode_auto::<i16>(black_box(&blob_i16_lg)).unwrap())
     });
+    g.bench_function("lerc-howell", |b| {
+        b.iter(|| howell::decode_slice::<i16>(black_box(&blob_i16_lg)).unwrap())
+    });
     g.finish();
 
     // -----------------------------------------------------------------
@@ -225,6 +235,9 @@ fn bench_decode(c: &mut Criterion) {
     });
     g.bench_function("lerc-ref", |b| {
         b.iter(|| ref_lerc::decode_auto::<f32>(black_box(&blob_f32_lg)).unwrap())
+    });
+    g.bench_function("lerc-howell", |b| {
+        b.iter(|| howell::decode_slice::<f32>(black_box(&blob_f32_lg)).unwrap())
     });
     g.finish();
 
@@ -238,6 +251,9 @@ fn bench_decode(c: &mut Criterion) {
     g.bench_function("lerc-ref", |b| {
         b.iter(|| ref_lerc::decode_auto::<f32>(black_box(&blob_f32_ll)).unwrap())
     });
+    g.bench_function("lerc-howell", |b| {
+        b.iter(|| howell::decode_slice::<f32>(black_box(&blob_f32_ll)).unwrap())
+    });
     g.finish();
 
     // -----------------------------------------------------------------
@@ -249,6 +265,9 @@ fn bench_decode(c: &mut Criterion) {
     });
     g.bench_function("lerc-ref", |b| {
         b.iter(|| ref_lerc::decode_auto::<f64>(black_box(&blob_f64_lg)).unwrap())
+    });
+    g.bench_function("lerc-howell", |b| {
+        b.iter(|| howell::decode_slice::<f64>(black_box(&blob_f64_lg)).unwrap())
     });
     g.finish();
 
@@ -262,6 +281,9 @@ fn bench_decode(c: &mut Criterion) {
     g.bench_function("lerc-ref", |b| {
         b.iter(|| ref_lerc::decode_auto::<u8>(black_box(&blob_u8_3band)).unwrap())
     });
+    g.bench_function("lerc-howell", |b| {
+        b.iter(|| howell::decode(black_box(&blob_u8_3band)).unwrap())
+    });
     g.finish();
 
     // -----------------------------------------------------------------
@@ -274,6 +296,9 @@ fn bench_decode(c: &mut Criterion) {
     g.bench_function("lerc-ref", |b| {
         b.iter(|| ref_lerc::decode_auto::<f32>(black_box(&blob_lerc1_ll)).unwrap())
     });
+    g.bench_function("lerc-howell", |b| {
+        b.iter(|| howell::decode_slice::<f32>(black_box(&blob_lerc1_ll)).unwrap())
+    });
     g.finish();
 
     // -----------------------------------------------------------------
@@ -285,6 +310,9 @@ fn bench_decode(c: &mut Criterion) {
     });
     g.bench_function("lerc-ref", |b| {
         b.iter(|| ref_lerc::decode_auto::<f32>(black_box(&blob_lerc1)).unwrap())
+    });
+    g.bench_function("lerc-howell", |b| {
+        b.iter(|| howell::decode_slice::<f32>(black_box(&blob_lerc1)).unwrap())
     });
     g.finish();
 }
